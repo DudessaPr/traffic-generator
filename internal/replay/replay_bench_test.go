@@ -6,12 +6,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/gopacket"
-	"github.com/google/gopacket/layers"
 	"tgen/internal/config"
 	"tgen/internal/metrics"
 	"tgen/internal/mutation"
 	"tgen/internal/session"
+
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
 )
 
 // discardSender counts packets without touching a network interface.
@@ -33,7 +34,7 @@ func buildRawTCPPacket() []byte {
 		DstIP:    net.ParseIP("5.6.7.8").To4(),
 	}
 	tcp := &layers.TCP{SrcPort: 1234, DstPort: 80, SYN: true}
-	tcp.SetNetworkLayerForChecksum(ip4)
+	_ = tcp.SetNetworkLayerForChecksum(ip4)
 	buf := gopacket.NewSerializeBuffer()
 	_ = gopacket.SerializeLayers(buf,
 		gopacket.SerializeOptions{ComputeChecksums: true, FixLengths: true},

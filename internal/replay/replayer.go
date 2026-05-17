@@ -158,7 +158,7 @@ func (r *Replayer) replaySession(ctx context.Context, s *session.Session) error 
 		} else {
 			capOffset = 0 // burst inside session
 		}
-		if wait := wallStart.Add(capOffset).Sub(time.Now()); wait > 0 {
+		if wait := time.Until(wallStart.Add(capOffset)); wait > 0 {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()

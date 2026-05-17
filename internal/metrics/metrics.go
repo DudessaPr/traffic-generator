@@ -101,7 +101,7 @@ func (c *Collector) Snapshot() Snapshot {
 
 func (c *Collector) report() {
 	snap := c.Snapshot()
-	fmt.Fprintf(c.out,
+	_, _ = fmt.Fprintf(c.out,
 		"[metrics] elapsed=%.1fs pkts=%d bytes=%d pps=%.0f bps=%.0f errors=%d sessions=%d empty=%d\n",
 		snap.ElapsedSec,
 		snap.PacketsSent,

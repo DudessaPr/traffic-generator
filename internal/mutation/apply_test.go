@@ -27,7 +27,7 @@ func buildEthIPv6TCP(srcIP, dstIP string, srcPort, dstPort uint16) []byte {
 		DstPort: layers.TCPPort(dstPort),
 		SYN:     true,
 	}
-	tcp.SetNetworkLayerForChecksum(ip6)
+	_ = tcp.SetNetworkLayerForChecksum(ip6)
 	buf := gopacket.NewSerializeBuffer()
 	opts := gopacket.SerializeOptions{ComputeChecksums: true, FixLengths: true}
 	if err := gopacket.SerializeLayers(buf, opts, eth, ip6, tcp); err != nil {
@@ -55,7 +55,7 @@ func buildEthIPTCP(srcIP, dstIP string, srcPort, dstPort uint16) []byte {
 		DstPort: layers.TCPPort(dstPort),
 		SYN:     true,
 	}
-	tcp.SetNetworkLayerForChecksum(ip)
+	_ = tcp.SetNetworkLayerForChecksum(ip)
 
 	buf := gopacket.NewSerializeBuffer()
 	opts := gopacket.SerializeOptions{ComputeChecksums: true, FixLengths: true}
@@ -155,7 +155,7 @@ func buildEthIPUDP(srcIP, dstIP string, srcPort, dstPort uint16) []byte {
 		SrcPort: layers.UDPPort(srcPort),
 		DstPort: layers.UDPPort(dstPort),
 	}
-	udp.SetNetworkLayerForChecksum(ip)
+	_ = udp.SetNetworkLayerForChecksum(ip)
 
 	buf := gopacket.NewSerializeBuffer()
 	opts := gopacket.SerializeOptions{ComputeChecksums: true, FixLengths: true}
@@ -308,7 +308,7 @@ func buildEthIPTCPWithTOS(srcIP, dstIP string, srcPort, dstPort uint16, tos uint
 		DstPort: layers.TCPPort(dstPort),
 		SYN:     true,
 	}
-	tcp.SetNetworkLayerForChecksum(ip)
+	_ = tcp.SetNetworkLayerForChecksum(ip)
 	buf := gopacket.NewSerializeBuffer()
 	opts := gopacket.SerializeOptions{ComputeChecksums: true, FixLengths: true}
 	if err := gopacket.SerializeLayers(buf, opts, eth, ip, tcp); err != nil {
@@ -338,7 +338,7 @@ func buildEthIPTCPWithWindow(srcIP, dstIP string, srcPort, dstPort uint16, windo
 		Window:  window,
 		ACK:     true,
 	}
-	tcp.SetNetworkLayerForChecksum(ip)
+	_ = tcp.SetNetworkLayerForChecksum(ip)
 	buf := gopacket.NewSerializeBuffer()
 	opts := gopacket.SerializeOptions{ComputeChecksums: true, FixLengths: true}
 	if err := gopacket.SerializeLayers(buf, opts, eth, ip, tcp); err != nil {
@@ -416,7 +416,7 @@ func TestApplyDSCPIPv4(t *testing.T) {
 	}{
 		{"zero plan leaves TOS unchanged", 0x00, 0, 0x00},
 		{"DSCP 46 (EF), ECN=0 preserved", 0x00, 46, 46 << 2},
-		{"DSCP 46 (EF), ECN=0b11 preserved", 0x03, 46, (0x03 & 0x03) | (46 << 2)},
+		{"DSCP 46 (EF), ECN=0b11 preserved", 0x03, 46, (46 << 2) | 0x03},
 		{"DSCP 34 (AF41), ECN=0b01 preserved", 0x01, 34, (0x01 & 0x03) | (34 << 2)},
 		{"DSCP 10 (AF11)", 0x00, 10, 10 << 2},
 	}
