@@ -1,0 +1,88 @@
+# tgen — example configuration
+# All fields are optional; omit them to keep the default.
+
+# Network interface to inject traffic onto.
+interface: "eth0"
+
+# PCAP source files.
+pcap_files:
+  - path: "traffic.pcap"
+
+# Session replay settings.
+replay:
+  # Mode: sequential | parallel | burst
+  #   sequential — one session at a time, timing-accurate inter-packet gaps
+  #   parallel   — up to `workers` sessions concurrently, each timing-accurate
+  #   burst      — no inter-packet delay; maximum throughput
+  mode: "sequential"
+
+  # Replay speed multiplier.
+  #   1.0 = real-time, 2.0 = twice as fast, 0 = burst (same as mode: burst)
+  speed: 1.0
+
+  # Repeat the entire session set this many times (0 = once).
+  loop_count: 0
+
+  # Repeat indefinitely (overrides loop_count).
+  loop: false
+
+  # Number of concurrent goroutines for parallel mode.
+  workers: 4
+
+# L3/L4 mutation rules.  Mutations are resolved once per session and then
+# applied consistently to every packet in that session.
+mutations:
+  # When preserve_sessions is true (default) the same mutation plan is
+  # applied to all packets sharing the same 5-tuple.
+  preserve_sessions: true
+
+  # Global overrides — applied when no rule matches.
+  # Accepts a single IP or leave empty to use a pool.
+  src_ip: ""
+  dst_ip: ""
+
+  # Pick a random source IP from this pool for each session.
+  # Supports both plain IPs and CIDR notation (up to /24 expanded).
+  src_ip_pool:
+    - "10.10.0.0/24"
+    - "10.10.1.1"
+
+  # Randomise source port in [src_port_min, src_port_max].
+  # Leave both at 0 to keep the original port.
+  src_port_min: 1024
+  src_port_max: 65535
+
+  # Force a specific destination port (0 = keep original).
+  dst_port: 0
+
+  # Rule-based overrides — evaluated in order; first match wins.
+  # Supports CIDR notation for IP fields; proto: tcp | udp | icmp | icmpv6.
+  rules:
+    - match:
+        src_ip: "192.168.0.0/16"
+        proto: "tcp"
+      replace:
+        src_ip: "10.0.0.1"
+        dst_port: 8080
+
+# Session filter — select which sessions to replay.
+# Advanced feature: pick sessions by duration and/or capture timestamp.
+filter:
+  # Skip sessions shorter than this (Go duration syntax: 500ms, 1s, 2m).
+  min_duration: ""
+  # Skip sessions longer than this.
+  max_duration: ""
+  # Only replay sessions that started after this time (RFC 3339).
+  start_after: ""
+  # Only replay sessions that started before this time.
+  start_before: ""
+  # Restrict to specific protocols.  Empty list means all.
+  protocols: []  # e.g. [tcp, udp]
+
+# Metrics / statistics reporting.
+metrics:
+  enabled: true
+  # How often to emit a report line.
+  report_interval: "1s"
+  # Output destination: stdout | stderr | /path/to/file.log
+  output: "stdout"

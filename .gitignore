@@ -1,0 +1,33 @@
+# Compiled binaries
+/tgen
+/build/
+
+# Test binary artifacts produced by go test -c
+*.test
+
+# Benchmark and profiling output
+*.prof
+*.out
+cpu.prof
+mem.prof
+
+# macOS metadata
+.DS_Store
+
+# Claude Code local settings (personal permission allowlist, machine-specific paths)
+.claude
+
+# Editor / IDE directories
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Go workspace files (not used in this project)
+go.work
+go.work.sum
+
+# PCAP captures — exclude large captures, keep only committed samples
+# Remove these two lines if you want to track .pcap files in git
+*.pcap
+!capture.pcap
