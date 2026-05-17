@@ -26,6 +26,11 @@ type MutationConfig struct {
 	SrcPortMin       uint16         `yaml:"src_port_min"`
 	SrcPortMax       uint16         `yaml:"src_port_max"`
 	DstPort          uint16         `yaml:"dst_port"`
+	TTL              uint8          `yaml:"ttl"`           // 0 = keep original
+	DSCP             uint8          `yaml:"dscp"`          // 0 = keep original; valid range 0–63
+	TCPSetFlags      string         `yaml:"tcp_set_flags"` // comma-separated: SYN,ACK,FIN,RST,PSH,URG
+	TCPClearFlags    string         `yaml:"tcp_clear_flags"`
+	TCPWindow        uint16         `yaml:"tcp_window"` // 0 = keep original
 	Rules            []MutationRule `yaml:"rules"`
 }
 
@@ -47,10 +52,15 @@ type MatchCondition struct {
 
 // ReplaceValues holds new field values. Zero values mean "keep original".
 type ReplaceValues struct {
-	SrcIP   string `yaml:"src_ip"`
-	DstIP   string `yaml:"dst_ip"`
-	SrcPort uint16 `yaml:"src_port"`
-	DstPort uint16 `yaml:"dst_port"`
+	SrcIP         string `yaml:"src_ip"`
+	DstIP         string `yaml:"dst_ip"`
+	SrcPort       uint16 `yaml:"src_port"`
+	DstPort       uint16 `yaml:"dst_port"`
+	TTL           uint8  `yaml:"ttl"`
+	DSCP          uint8  `yaml:"dscp"`
+	TCPSetFlags   string `yaml:"tcp_set_flags"`
+	TCPClearFlags string `yaml:"tcp_clear_flags"`
+	TCPWindow     uint16 `yaml:"tcp_window"`
 }
 
 // ReplayConfig controls timing and concurrency of the replay engine.

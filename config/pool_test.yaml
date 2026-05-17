@@ -1,0 +1,14 @@
+interface: "en0"
+pcap_files:
+  - path: "traffic.pcap"
+replay:
+  mode: "burst"
+mutations:
+  preserve_sessions: true
+  src_ip_pool:
+    - "127.0.1.0/24"
+  dst_ip: "127.0.0.1"
+  src_port_min: 10000
+  src_port_max: 20000
+metrics:
+  enabled: false

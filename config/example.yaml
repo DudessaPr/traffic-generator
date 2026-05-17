@@ -55,6 +55,22 @@ mutations:
   # Force a specific destination port (0 = keep original).
   dst_port: 0
 
+  # Override TTL (IPv4) / HopLimit (IPv6).  0 = keep original.
+  ttl: 0
+
+  # Override DSCP (Differentiated Services Code Point), 6-bit value 0–63.
+  # The ECN bits are preserved.  0 = keep original.
+  dscp: 0
+
+  # Force specific TCP flags on/off (comma-separated: SYN,ACK,FIN,RST,PSH,URG,ECE,CWR,NS).
+  # tcp_set_flags forces the listed flags to 1; tcp_clear_flags forces them to 0.
+  # The two lists may overlap: set wins over clear on the same flag within the same packet.
+  tcp_set_flags: ""
+  tcp_clear_flags: ""
+
+  # Override TCP window size (bytes).  0 = keep original.
+  tcp_window: 0
+
   # Rule-based overrides — evaluated in order; first match wins.
   # Supports CIDR notation for IP fields; proto: tcp | udp | icmp | icmpv6.
   rules:

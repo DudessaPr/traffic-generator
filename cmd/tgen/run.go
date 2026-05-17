@@ -27,9 +27,18 @@ var runFlags struct {
 	workers    int
 	srcIP      string
 	dstIP      string
+	srcIPPool  []string
+	dstIPPool  []string
 	srcPortMin uint16
 	srcPortMax uint16
 	dstPort    uint16
+	// L3 header mutations
+	ttl  uint8
+	dscp uint8
+	// TCP header mutations
+	tcpSetFlags   string
+	tcpClearFlags string
+	tcpWindow     uint16
 	// filter flags
 	minDuration string
 	maxDuration string
@@ -55,9 +64,16 @@ func init() {
 	f.IntVar(&runFlags.workers, "workers", 4, "goroutine count for parallel mode")
 	f.StringVar(&runFlags.srcIP, "src-ip", "", "override source IP for all sessions")
 	f.StringVar(&runFlags.dstIP, "dst-ip", "", "override destination IP for all sessions")
+	f.StringSliceVar(&runFlags.srcIPPool, "src-ip-pool", nil, "source IP pool: random IP per session (CIDR or plain IP, repeatable)")
+	f.StringSliceVar(&runFlags.dstIPPool, "dst-ip-pool", nil, "destination IP pool: random IP per session (CIDR or plain IP, repeatable)")
 	f.Uint16Var(&runFlags.srcPortMin, "src-port-min", 0, "randomise source port from this value")
 	f.Uint16Var(&runFlags.srcPortMax, "src-port-max", 0, "randomise source port up to this value")
 	f.Uint16Var(&runFlags.dstPort, "dst-port", 0, "override destination port for all sessions")
+	f.Uint8Var(&runFlags.ttl, "ttl", 0, "override TTL (IPv4) / HopLimit (IPv6); 0=keep original")
+	f.Uint8Var(&runFlags.dscp, "dscp", 0, "override DSCP (0–63); 0=keep original")
+	f.StringVar(&runFlags.tcpSetFlags, "tcp-set-flags", "", "TCP flags to force on, comma-separated: SYN,ACK,FIN,RST,PSH,URG")
+	f.StringVar(&runFlags.tcpClearFlags, "tcp-clear-flags", "", "TCP flags to force off, comma-separated: SYN,ACK,FIN,RST,PSH,URG")
+	f.Uint16Var(&runFlags.tcpWindow, "tcp-window", 0, "override TCP window size; 0=keep original")
 	f.StringVar(&runFlags.minDuration, "min-duration", "", "skip sessions shorter than this (e.g. 500ms)")
 	f.StringVar(&runFlags.maxDuration, "max-duration", "", "skip sessions longer than this (e.g. 30s)")
 	f.StringVar(&runFlags.startAfter, "start-after", "", "skip sessions that start before this time (RFC 3339)")
@@ -174,9 +190,16 @@ func buildConfig(args []string) (*config.Config, error) {
 		PreserveSessions: true,
 		SrcIP:            runFlags.srcIP,
 		DstIP:            runFlags.dstIP,
+		SrcIPPool:        runFlags.srcIPPool,
+		DstIPPool:        runFlags.dstIPPool,
 		SrcPortMin:       runFlags.srcPortMin,
 		SrcPortMax:       runFlags.srcPortMax,
 		DstPort:          runFlags.dstPort,
+		TTL:              runFlags.ttl,
+		DSCP:             runFlags.dscp,
+		TCPSetFlags:      runFlags.tcpSetFlags,
+		TCPClearFlags:    runFlags.tcpClearFlags,
+		TCPWindow:        runFlags.tcpWindow,
 	}
 	cfg.Filter = config.FilterConfig{
 		MinDuration: runFlags.minDuration,

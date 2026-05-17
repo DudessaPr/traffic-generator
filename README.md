@@ -23,6 +23,7 @@ timing control, and session filtering.
 9. [Metrics output](#metrics-output)
 10. [Testing & benchmarks](#testing--benchmarks)
 11. [Makefile targets](#makefile-targets)
+12. [CLI examples](#cli-examples)
 
 ---
 
@@ -94,11 +95,18 @@ tgen run -c <config.yaml>
 | `-l, --loop` | `false` | Repeat indefinitely |
 | `--loop-count` | `0` | Number of replay passes (0 = once) |
 | `--workers` | `4` | Goroutine count for `parallel` mode |
-| `--src-ip` | — | Override source IP for all sessions |
-| `--dst-ip` | — | Override destination IP for all sessions |
+| `--src-ip` | — | Override source IP for all sessions (fixed, same IP for every session) |
+| `--dst-ip` | — | Override destination IP for all sessions (fixed) |
+| `--src-ip-pool` | — | Pick a random source IP per session from this pool (CIDR or plain IP, repeatable) |
+| `--dst-ip-pool` | — | Pick a random destination IP per session from this pool (CIDR or plain IP, repeatable) |
 | `--src-port-min` | `0` | Randomise source port starting from this value |
 | `--src-port-max` | `0` | Randomise source port up to this value |
 | `--dst-port` | `0` | Override destination port for all sessions |
+| `--ttl` | `0` | Override IPv4 TTL / IPv6 HopLimit (`0` = keep original) |
+| `--dscp` | `0` | Override DSCP value (0–63); ECN bits preserved (`0` = keep original) |
+| `--tcp-set-flags` | — | TCP flags to force **on**, comma-separated: `SYN,ACK,FIN,RST,PSH,URG` |
+| `--tcp-clear-flags` | — | TCP flags to force **off**, comma-separated |
+| `--tcp-window` | `0` | Override TCP window size in bytes (`0` = keep original) |
 | `--min-duration` | — | Skip sessions shorter than this (e.g. `500ms`, `1s`) |
 | `--max-duration` | — | Skip sessions longer than this |
 | `--start-after` | — | Skip sessions that started before this time (RFC 3339) |
@@ -136,6 +144,21 @@ sudo ./build/tgen run -i eth0 capture1.pcap capture2.pcap capture3.pcap
 
 # Use a config file (CLI --interface overrides config file value)
 sudo ./build/tgen run -c config/example.yaml -i lo
+
+# Set TTL to 64 on all outgoing packets
+sudo ./build/tgen run -i eth0 --ttl 64 traffic.pcap
+
+# Mark all packets with DSCP AF41 (value 34) for QoS testing
+sudo ./build/tgen run -i eth0 --dscp 34 traffic.pcap
+
+# Force SYN+ACK flags on every TCP packet (e.g. to test firewall rules)
+sudo ./build/tgen run -i eth0 --tcp-set-flags SYN,ACK traffic.pcap
+
+# Clear RST flag to suppress TCP resets mid-replay
+sudo ./build/tgen run -i eth0 --tcp-clear-flags RST traffic.pcap
+
+# Override TCP window size to 65535 to test receiver buffer behaviour
+sudo ./build/tgen run -i eth0 --tcp-window 65535 traffic.pcap
 ```
 
 ---
@@ -256,6 +279,19 @@ mutations:
   # Force a specific destination port.  0 = keep original.
   dst_port: 0
 
+  # Override TTL (IPv4) / HopLimit (IPv6).  0 = keep original.
+  ttl: 0
+
+  # Override DSCP (6-bit, 0–63).  ECN bits are preserved.  0 = keep original.
+  dscp: 0
+
+  # Force TCP flags on or off (comma-separated: SYN,ACK,FIN,RST,PSH,URG,ECE,CWR,NS).
+  tcp_set_flags: ""
+  tcp_clear_flags: ""
+
+  # Override TCP window size in bytes.  0 = keep original.
+  tcp_window: 0
+
   # Rule-based overrides — evaluated in order; first match wins.
   # Rules take precedence over all global settings above.
   rules:
@@ -297,9 +333,13 @@ checksums, and application-layer framing remain coherent.
 **Priority order** (highest to lowest):
 
 1. `mutations.rules[]` — match conditions evaluated top-to-bottom; first match wins and skips all others.
-2. `mutations.src_ip` / `mutations.dst_ip` — single fixed IP override.
-3. `mutations.src_ip_pool` / `mutations.dst_ip_pool` — one IP chosen randomly from the pool at session setup.
+2. `mutations.src_ip` / `mutations.dst_ip` — single fixed IP override (CLI: `--src-ip`, `--dst-ip`).
+3. `mutations.src_ip_pool` / `mutations.dst_ip_pool` — one IP chosen randomly from the pool at session setup (CLI: `--src-ip-pool`, `--dst-ip-pool`).
 4. Original values — used for any field not explicitly overridden.
+
+**Fixed IP vs pool:** `--src-ip` assigns the same address to every session. `--src-ip-pool` draws a different random IP per session from the expanded pool, making each flow appear to come from a distinct host. If both are set, `--src-ip` wins.
+
+The same priority applies to every mutable field: `ttl`, `dscp`, `tcp_set_flags`, `tcp_clear_flags`, `tcp_window`.
 
 **Checksum recomputation** is automatic. IP, TCP, and UDP checksums are
 recomputed after every mutation so injected packets are always valid on the
@@ -308,6 +348,15 @@ wire.
 **IP family safety**: if a plan IP is IPv4 and the packet is IPv6 (or vice
 versa), the mutation is silently skipped and the original address is preserved.
 This prevents corrupted frames from reaching the wire.
+
+**DSCP encoding**: DSCP occupies bits 7–2 of the IPv4 TOS byte and the IPv6
+TrafficClass byte. Bits 1–0 (ECN) are always preserved:
+`newTOS = (oldTOS & 0x03) | (dscp << 2)`.
+
+**TCP flags**: `tcp_set_flags` forces listed flags to 1; `tcp_clear_flags`
+forces them to 0. Both accept a comma-separated list of names: `SYN`, `ACK`,
+`FIN`, `RST`, `PSH`, `URG`, `ECE`, `CWR`, `NS`. Apply order is set-then-clear,
+so if the same flag appears in both lists it ends up cleared.
 
 ### Example: remap a subnet and randomise ports
 
@@ -325,6 +374,18 @@ mutations:
       replace:
         dst_ip: "10.0.0.5"
         dst_port: 443
+```
+
+### Example: QoS and firewall testing
+
+```yaml
+mutations:
+  preserve_sessions: true
+  ttl: 64           # normalise TTL across all flows
+  dscp: 46          # Expedited Forwarding (EF) — highest priority queue
+  tcp_set_flags: "ACK"
+  tcp_clear_flags: "RST"
+  tcp_window: 65535
 ```
 
 ---
@@ -452,3 +513,10 @@ Benchmark results (Apple M3 Pro):
 | `make run-sessions` | `tgen sessions -v traffic.pcap` |
 | `make run-sessions-filter` | TCP sessions > 100 ms in `traffic.pcap` |
 | `make clean` | Remove `./build/` |
+
+---
+
+## CLI examples
+
+A comprehensive reference of every flag combination is in
+[`docs/CLI_EXAMPLES.md`](docs/CLI_EXAMPLES.md).

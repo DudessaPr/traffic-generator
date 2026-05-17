@@ -120,7 +120,20 @@ Mutate IPv4/IPv6 SrcIP / DstIP
   (IPv6-only plan IP silently skipped for IPv4 packets, and vice versa)
       │
       ▼
+Mutate IPv4 TTL  / IPv6 HopLimit      (plan.TTL != 0)
+      │
+      ▼
+Mutate IPv4 TOS[7:2] / IPv6 TrafficClass[7:2]  — DSCP, ECN bits preserved
+  (plan.DSCP != 0)
+      │
+      ▼
 Mutate TCP/UDP SrcPort / DstPort
+      │
+      ▼
+Mutate TCP flags — set (plan.TCPSetFlags) then clear (plan.TCPClearFlags)
+      │
+      ▼
+Mutate TCP Window                     (plan.TCPWindow != 0)
       │
       ▼
 tcp.SetNetworkLayerForChecksum(ip)   — bind pseudo-header
@@ -136,6 +149,18 @@ mutated raw bytes
 
 Checksum correctness is guaranteed by gopacket's serialisation pass, which
 recomputes IP, TCP, and UDP checksums using the updated headers.
+
+### DSCP encoding
+
+DSCP occupies bits 7–2 of the IPv4 TOS byte (and the IPv6 TrafficClass byte);
+bits 1–0 carry ECN and are preserved: `newTOS = (oldTOS & 0x03) | (dscp << 2)`.
+
+### TCP flags encoding
+
+`plan.TCPSetFlags` and `plan.TCPClearFlags` are comma-separated strings
+(`"SYN,ACK"`, `"RST"`). `applyTCPFlagBits` iterates the tokens and assigns
+the corresponding `layers.TCP` boolean fields. Apply order: set first, then
+clear — so if the same flag appears in both lists, it ends up cleared.
 
 ---
 

@@ -1,0 +1,51 @@
+# Ready-to-run config for traffic.pcap
+# Before using: replace "lo" below with your actual interface.
+# Find your interface name with: ifconfig | grep -E '^[a-z]'
+# On macOS "lo0" is loopback; on Linux "lo" or "eth0" etc.
+
+interface: "en0"
+
+pcap_files:
+  - path: "traffic.pcap"
+
+replay:
+  mode: "sequential"   # one session at a time, timing-accurate
+  speed: 2.0           # 2× faster than original capture
+  loop_count: 1        # replay once
+  loop: false
+  workers: 4
+
+mutations:
+  preserve_sessions: true
+
+  # Remap all traffic to loopback addresses so no real packets leave the machine
+  src_ip: "127.0.0.1"
+  dst_ip: "127.0.0.2"
+
+  # Randomise source port so each pass looks like a fresh client
+  src_port_min: 1024
+  src_port_max: 65535
+
+  # Normalise TTL and mark as best-effort
+  ttl: 64
+  dscp: 0
+
+  # Rule: redirect TCP 443 sessions to a local port 8080
+  rules:
+    - match:
+        proto: "tcp"
+        dst_port: 443
+      replace:
+        dst_ip: "127.0.0.1"
+        dst_port: 8080
+
+filter:
+  # Only replay sessions longer than 10ms (skip tiny one-shot DNS pairs)
+  min_duration: "10ms"
+  # All protocols (udp, tcp, icmp)
+  protocols: []
+
+metrics:
+  enabled: true
+  report_interval: "1s"
+  output: "stdout"

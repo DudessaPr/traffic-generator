@@ -12,12 +12,17 @@ import (
 )
 
 // Plan is the resolved set of L3/L4 replacements for one session.
-// A nil IP field means "keep the original". A zero port means "keep original".
+// A nil IP field means "keep the original". Zero numeric fields mean "keep original".
 type Plan struct {
-	SrcIP   net.IP
-	DstIP   net.IP
-	SrcPort uint16
-	DstPort uint16
+	SrcIP         net.IP
+	DstIP         net.IP
+	SrcPort       uint16
+	DstPort       uint16
+	TTL           uint8  // 0 = keep original
+	DSCP          uint8  // 0 = keep original (DSCP 0 is Default Forwarding but indistinguishable from "unset")
+	TCPSetFlags   string // comma-separated flag names to force on
+	TCPClearFlags string // comma-separated flag names to force off
+	TCPWindow     uint16 // 0 = keep original
 }
 
 // Mutator resolves and caches per-session mutation plans, ensuring that
@@ -114,6 +119,22 @@ func (m *Mutator) buildPlan(sess *session.Session) Plan {
 		plan.DstPort = m.cfg.DstPort
 	}
 
+	if m.cfg.TTL != 0 {
+		plan.TTL = m.cfg.TTL
+	}
+	if m.cfg.DSCP != 0 {
+		plan.DSCP = m.cfg.DSCP
+	}
+	if m.cfg.TCPSetFlags != "" {
+		plan.TCPSetFlags = m.cfg.TCPSetFlags
+	}
+	if m.cfg.TCPClearFlags != "" {
+		plan.TCPClearFlags = m.cfg.TCPClearFlags
+	}
+	if m.cfg.TCPWindow != 0 {
+		plan.TCPWindow = m.cfg.TCPWindow
+	}
+
 	return plan
 }
 
@@ -140,6 +161,21 @@ func applyReplace(plan *Plan, r config.ReplaceValues) {
 	}
 	if r.DstPort != 0 {
 		plan.DstPort = r.DstPort
+	}
+	if r.TTL != 0 {
+		plan.TTL = r.TTL
+	}
+	if r.DSCP != 0 {
+		plan.DSCP = r.DSCP
+	}
+	if r.TCPSetFlags != "" {
+		plan.TCPSetFlags = r.TCPSetFlags
+	}
+	if r.TCPClearFlags != "" {
+		plan.TCPClearFlags = r.TCPClearFlags
+	}
+	if r.TCPWindow != 0 {
+		plan.TCPWindow = r.TCPWindow
 	}
 }
 
