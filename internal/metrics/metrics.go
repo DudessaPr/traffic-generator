@@ -16,6 +16,9 @@ type Counters struct {
 	Errors       atomic.Int64
 	SessionsDone atomic.Int64
 	EmptyPackets atomic.Int64
+	ActiveFlows  atomic.Int64 // flows currently in flight
+	OpenFlows    atomic.Int64 // flows with no FIN/RST sent yet
+	FlowsStarted atomic.Int64 // cumulative flows started (used for CPS delta)
 }
 
 // Snapshot is an immutable point-in-time copy of Counters plus derived rates.
@@ -25,9 +28,17 @@ type Snapshot struct {
 	Errors       int64
 	SessionsDone int64
 	EmptyPackets int64
+	ActiveFlows  int64
+	OpenFlows    int64
+	FlowsStarted int64   // cumulative; used for CPS delta across snapshots
 	PPS          float64 // packets / second since previous snapshot
 	BPS          float64 // bytes / second since previous snapshot
+	CPS          float64 // connections (flows) started / second since previous snapshot
 	ElapsedSec   float64
+	// Configuration metadata copied from Collector (not computed from counters).
+	TargetRate string
+	TargetCPS  float64
+	Multiplier float64
 }
 
 // Collector gathers Counters and reports them periodically.
@@ -37,6 +48,10 @@ type Collector struct {
 	out      io.Writer
 	start    time.Time
 	prev     Snapshot
+	// Configuration metadata exposed in every Snapshot; set by the caller.
+	TargetRate string
+	TargetCPS  float64
+	Multiplier float64
 }
 
 // New creates a Collector. output is "stdout", "stderr", or a file path.
@@ -80,12 +95,16 @@ func (c *Collector) Snapshot() Snapshot {
 	errs := c.C.Errors.Load()
 	sess := c.C.SessionsDone.Load()
 	empty := c.C.EmptyPackets.Load()
+	active := c.C.ActiveFlows.Load()
+	open := c.C.OpenFlows.Load()
+	flowsStarted := c.C.FlowsStarted.Load()
 
 	dt := now - c.prev.ElapsedSec
-	var pps, bps float64
+	var pps, bps, cps float64
 	if dt > 0 {
 		pps = float64(pkts-c.prev.PacketsSent) / dt
 		bps = float64(bytes-c.prev.BytesSent) / dt
+		cps = float64(flowsStarted-c.prev.FlowsStarted) / dt
 	}
 	return Snapshot{
 		PacketsSent:  pkts,
@@ -93,23 +112,31 @@ func (c *Collector) Snapshot() Snapshot {
 		Errors:       errs,
 		SessionsDone: sess,
 		EmptyPackets: empty,
+		ActiveFlows:  active,
+		OpenFlows:    open,
+		FlowsStarted: flowsStarted,
 		PPS:          pps,
 		BPS:          bps,
+		CPS:          cps,
 		ElapsedSec:   now,
+		TargetRate:   c.TargetRate,
+		TargetCPS:    c.TargetCPS,
+		Multiplier:   c.Multiplier,
 	}
 }
 
 func (c *Collector) report() {
 	snap := c.Snapshot()
 	_, _ = fmt.Fprintf(c.out,
-		"[metrics] elapsed=%.1fs pkts=%d bytes=%d pps=%.0f bps=%.0f errors=%d sessions=%d empty=%d\n",
+		"[metrics] elapsed=%.1fs pkts=%d pps=%.0f bps=%.0f errors=%d active=%d open=%d cps=%.0f empty=%d\n",
 		snap.ElapsedSec,
 		snap.PacketsSent,
-		snap.BytesSent,
 		snap.PPS,
 		snap.BPS,
 		snap.Errors,
-		snap.SessionsDone,
+		snap.ActiveFlows,
+		snap.OpenFlows,
+		snap.CPS,
 		snap.EmptyPackets,
 	)
 	c.prev = snap

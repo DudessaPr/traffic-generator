@@ -11,7 +11,7 @@ import (
 	"tgen/internal/session"
 )
 
-// Plan is the resolved set of L3/L4 replacements for one session.
+// Plan is the resolved set of L2/L3/L4 replacements for one session.
 // A nil IP field means "keep the original". Zero numeric fields mean "keep original".
 type Plan struct {
 	SrcIP         net.IP
@@ -23,18 +23,20 @@ type Plan struct {
 	TCPSetFlags   string // comma-separated flag names to force on
 	TCPClearFlags string // comma-separated flag names to force off
 	TCPWindow     uint16 // 0 = keep original
+	DstMAC        net.HardwareAddr // if non-nil, rewrite Ethernet dst MAC
 }
 
 // Mutator resolves and caches per-session mutation plans, ensuring that
 // every packet belonging to the same flow receives identical rewrites.
 type Mutator struct {
 	cfg     config.MutationConfig
-	mu      sync.Mutex
+	mu      sync.RWMutex
 	cache   map[session.Key]Plan
-	srcPool []net.IP // expanded from src_ip_pool CIDRs
-	dstPool []net.IP // expanded from dst_ip_pool CIDRs
-	// rng is accessed only inside buildPlan, which is always called while mu
-	// is held (via PlanFor). No separate lock is needed for rng itself.
+	srcPool []net.IP         // expanded from src_ip_pool CIDRs
+	dstPool []net.IP         // expanded from dst_ip_pool CIDRs
+	dstMAC  net.HardwareAddr // parsed once from cfg.DstMAC
+	// rng is accessed only inside buildPlan, which is always called under the
+	// write lock (mu.Lock). No separate lock is needed for rng itself.
 	rng *rand.Rand
 }
 
@@ -46,27 +48,67 @@ func New(cfg config.MutationConfig) (*Mutator, error) {
 		// Seed with wall-clock nanoseconds so pool selection differs on every run.
 		rng: rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
+	if cfg.DstMAC != "" {
+		mac, err := net.ParseMAC(cfg.DstMAC)
+		if err != nil {
+			return nil, fmt.Errorf("dst_mac: %w", err)
+		}
+		m.dstMAC = mac
+	}
 	var err error
-	if m.srcPool, err = expandPool(cfg.SrcIPPool); err != nil {
+	if m.srcPool, err = expandPool(cfg.SrcIPPool, cfg.IPPoolLimit); err != nil {
 		return nil, fmt.Errorf("src_ip_pool: %w", err)
 	}
-	if m.dstPool, err = expandPool(cfg.DstIPPool); err != nil {
+	if m.dstPool, err = expandPool(cfg.DstIPPool, cfg.IPPoolLimit); err != nil {
 		return nil, fmt.Errorf("dst_ip_pool: %w", err)
 	}
 	return m, nil
 }
 
 // PlanFor returns the mutation plan for sess, creating and caching it on first call.
+// Uses double-checked locking: concurrent cache-hit reads proceed in parallel
+// under RLock; only cache misses (rare after warm-up) compete for the write lock.
 func (m *Mutator) PlanFor(sess *session.Session) Plan {
 	key := sess.Key
+
+	m.mu.RLock()
+	if p, ok := m.cache[key]; ok {
+		m.mu.RUnlock()
+		return p
+	}
+	m.mu.RUnlock()
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if p, ok := m.cache[key]; ok {
+	if p, ok := m.cache[key]; ok { // another goroutine may have built the plan while we waited
 		return p
 	}
 	p := m.buildPlan(sess)
 	m.cache[key] = p
 	return p
+}
+
+// ResetCache discards all cached plans. The next PlanFor call for any session
+// will draw a fresh random IP from the pool, enabling per-iteration IP diversity
+// when used with --ip-pool-per-iter.
+func (m *Mutator) ResetCache() {
+	m.mu.Lock()
+	m.cache = make(map[session.Key]Plan)
+	m.mu.Unlock()
+}
+
+// CacheLen returns the number of currently cached plans.
+func (m *Mutator) CacheLen() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.cache)
+}
+
+// PoolStats returns the number of IPs in the source and destination pools.
+func (m *Mutator) PoolStats() (srcLen, dstLen int) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.srcPool), len(m.dstPool)
 }
 
 func (m *Mutator) buildPlan(sess *session.Session) Plan {
@@ -81,6 +123,10 @@ func (m *Mutator) buildPlan(sess *session.Session) Plan {
 	for _, rule := range m.cfg.Rules {
 		if matchesCondition(rule.Match, sess) {
 			applyReplace(&plan, rule.Replace)
+			// DstMAC global override still applies even for rule-matched sessions.
+			if len(m.dstMAC) > 0 {
+				plan.DstMAC = append(net.HardwareAddr(nil), m.dstMAC...)
+			}
 			return plan
 		}
 	}
@@ -88,10 +134,7 @@ func (m *Mutator) buildPlan(sess *session.Session) Plan {
 	// Global / pool-based mutations.
 	if m.cfg.SrcIP != "" {
 		if ip := net.ParseIP(m.cfg.SrcIP); ip != nil {
-			plan.SrcIP = ip.To4()
-			if plan.SrcIP == nil {
-				plan.SrcIP = ip.To16()
-			}
+			plan.SrcIP = normaliseIP(ip)
 		}
 	} else if len(m.srcPool) > 0 {
 		plan.SrcIP = m.srcPool[m.rng.Intn(len(m.srcPool))]
@@ -99,10 +142,7 @@ func (m *Mutator) buildPlan(sess *session.Session) Plan {
 
 	if m.cfg.DstIP != "" {
 		if ip := net.ParseIP(m.cfg.DstIP); ip != nil {
-			plan.DstIP = ip.To4()
-			if plan.DstIP == nil {
-				plan.DstIP = ip.To16()
-			}
+			plan.DstIP = normaliseIP(ip)
 		}
 	} else if len(m.dstPool) > 0 {
 		plan.DstIP = m.dstPool[m.rng.Intn(len(m.dstPool))]
@@ -134,26 +174,31 @@ func (m *Mutator) buildPlan(sess *session.Session) Plan {
 	if m.cfg.TCPWindow != 0 {
 		plan.TCPWindow = m.cfg.TCPWindow
 	}
+	if len(m.dstMAC) > 0 {
+		plan.DstMAC = append(net.HardwareAddr(nil), m.dstMAC...)
+	}
 
 	return plan
+}
+
+// normaliseIP returns a 4-byte slice for IPv4-mappable addresses, 16-byte otherwise.
+func normaliseIP(ip net.IP) net.IP {
+	if v4 := ip.To4(); v4 != nil {
+		return v4
+	}
+	return ip.To16()
 }
 
 // applyReplace overwrites plan fields with non-zero values from r.
 func applyReplace(plan *Plan, r config.ReplaceValues) {
 	if r.SrcIP != "" {
 		if ip := net.ParseIP(r.SrcIP); ip != nil {
-			plan.SrcIP = ip.To4()
-			if plan.SrcIP == nil {
-				plan.SrcIP = ip.To16()
-			}
+			plan.SrcIP = normaliseIP(ip)
 		}
 	}
 	if r.DstIP != "" {
 		if ip := net.ParseIP(r.DstIP); ip != nil {
-			plan.DstIP = ip.To4()
-			if plan.DstIP == nil {
-				plan.DstIP = ip.To16()
-			}
+			plan.DstIP = normaliseIP(ip)
 		}
 	}
 	if r.SrcPort != 0 {
@@ -216,40 +261,57 @@ func ipMatchesCIDROrAddr(s string, ip net.IP) bool {
 }
 
 // expandPool converts a list of IP strings / CIDRs into a flat list of host IPs.
-// CIDRs larger than /24 are capped at 256 hosts to avoid memory blowout.
-func expandPool(pool []string) ([]net.IP, error) {
-	const maxPerCIDR = 256
+// limit caps the number of hosts expanded per CIDR (0 → default 256, max 65536).
+// Both IPv4 and IPv6 CIDRs are supported; for IPv4 network/broadcast addresses
+// are excluded for prefix lengths < /31.
+func expandPool(pool []string, limit int) ([]net.IP, error) {
+	const defaultLimit = 256
+	const maxLimit = 65536
+	if limit <= 0 {
+		limit = defaultLimit
+	}
+	if limit > maxLimit {
+		limit = maxLimit
+	}
 	var out []net.IP
 	for _, s := range pool {
 		ip := net.ParseIP(s)
 		if ip != nil {
-			out = append(out, ip.To4())
+			out = append(out, normaliseIP(ip))
 			continue
 		}
 		_, cidr, err := net.ParseCIDR(s)
 		if err != nil {
 			return nil, fmt.Errorf("invalid IP/CIDR %q", s)
 		}
+
+		isIPv6 := cidr.IP.To4() == nil
 		ones, _ := cidr.Mask.Size()
-		// For prefix lengths shorter than /31 the first address is the network
-		// address and the last is the broadcast address; neither is a valid host.
-		// /31 (point-to-point) and /32 (single host) have no boundary addresses,
-		// so skipBoundaries is false for those and the single IP is included.
-		skipBoundaries := ones < 31
+
+		// For IPv4, skip network and broadcast addresses for prefix lengths < /31.
+		// /31 (point-to-point) and /32 (single host) have no boundary addresses.
+		// For IPv6, all addresses including the first and last are valid hosts.
+		skipBoundaries := !isIPv6 && ones < 31
+
 		networkAddr := cidr.IP.Mask(cidr.Mask)
 		broadcast := make(net.IP, len(networkAddr))
 		for i := range networkAddr {
 			broadcast[i] = networkAddr[i] | ^cidr.Mask[i]
 		}
+
 		count := 0
 		for ip := cidr.IP.Mask(cidr.Mask); cidr.Contains(ip); incrementIP(ip) {
-			if count >= maxPerCIDR {
+			if count >= limit {
 				break
 			}
 			if skipBoundaries && (ip.Equal(networkAddr) || ip.Equal(broadcast)) {
 				continue
 			}
-			out = append(out, append(net.IP(nil), ip.To4()...))
+			if isIPv6 {
+				out = append(out, append(net.IP(nil), ip...))
+			} else {
+				out = append(out, append(net.IP(nil), ip.To4()...))
+			}
 			count++
 		}
 	}

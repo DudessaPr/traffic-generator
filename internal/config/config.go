@@ -2,12 +2,15 @@ package config
 
 // Config is the root configuration for tgen.
 type Config struct {
-	Interface string         `yaml:"interface"`
-	PcapFiles []PcapSource   `yaml:"pcap_files"`
-	Mutations MutationConfig `yaml:"mutations"`
-	Replay    ReplayConfig   `yaml:"replay"`
-	Filter    FilterConfig   `yaml:"filter"`
-	Metrics   MetricsConfig  `yaml:"metrics"`
+	Interface  string       `yaml:"interface"`
+	Interfaces []string     `yaml:"interfaces"`  // multi-interface pool; overrides Interface when set
+	TargetIP   string       `yaml:"target_ip"`   // auto-resolve interface + gateway MAC
+	Sender     string       `yaml:"sender"`      // "pcap" (default) | "raw" (Linux AF_PACKET)
+	PcapFiles  []PcapSource `yaml:"pcap_files"`
+	Mutations  MutationConfig `yaml:"mutations"`
+	Replay     ReplayConfig   `yaml:"replay"`
+	Filter     FilterConfig   `yaml:"filter"`
+	Metrics    MetricsConfig  `yaml:"metrics"`
 }
 
 // PcapSource describes one PCAP input file.
@@ -31,6 +34,8 @@ type MutationConfig struct {
 	TCPSetFlags      string         `yaml:"tcp_set_flags"` // comma-separated: SYN,ACK,FIN,RST,PSH,URG
 	TCPClearFlags    string         `yaml:"tcp_clear_flags"`
 	TCPWindow        uint16         `yaml:"tcp_window"` // 0 = keep original
+	DstMAC           string         `yaml:"dst_mac"`        // override Ethernet dst MAC (e.g. gateway MAC)
+	IPPoolLimit      int            `yaml:"ip_pool_limit"`  // max hosts expanded per CIDR; 0 = default (256)
 	Rules            []MutationRule `yaml:"rules"`
 }
 
@@ -65,12 +70,19 @@ type ReplaceValues struct {
 
 // ReplayConfig controls timing and concurrency of the replay engine.
 type ReplayConfig struct {
-	// Mode is one of: sequential, parallel, burst.
-	Mode      string  `yaml:"mode"`
-	Speed     float64 `yaml:"speed"`      // 1.0 = real-time, 2.0 = 2× faster, 0 = burst
-	Loop      bool    `yaml:"loop"`       // repeat indefinitely
-	LoopCount int     `yaml:"loop_count"` // 0 means once; Loop overrides this
-	Workers   int     `yaml:"workers"`    // goroutine count for parallel mode
+	// Mode is one of: sequential, parallel, burst, pcap.
+	Mode          string  `yaml:"mode"`
+	Speed         float64 `yaml:"speed"`          // 1.0 = real-time, 2.0 = 2× faster, 0 = burst
+	Loop          bool    `yaml:"loop"`           // repeat indefinitely
+	LoopCount     int     `yaml:"loop_count"`     // 0 means once; Loop overrides this
+	Workers       int     `yaml:"workers"`        // goroutine count for parallel mode
+	Rate          string  `yaml:"rate"`           // e.g. "100kpps", "1gbps"; empty = unlimited
+	RateRamp      string  `yaml:"rate_ramp"`      // linear ramp duration, e.g. "60s"; empty = no ramp
+	CPS           float64 `yaml:"cps"`            // new sessions per second (sequential/parallel only); 0 = unlimited
+	Multiplier    float64 `yaml:"multiplier"`     // scales Rate and CPS; 0 or 1.0 = no change
+	PreProcess    bool    `yaml:"pre_process"`    // pre-mutate all packets before replay (burst/parallel only)
+	IPPoolPerIter bool    `yaml:"ip_pool_per_iter"` // clear mutation plan cache at start of each loop iteration
+	BatchSize     int     `yaml:"batch_size"`     // frames per SendBatch call in burst mode (0=default 32, max 256)
 }
 
 // FilterConfig selects which sessions to include in replay (advanced feature).

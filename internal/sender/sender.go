@@ -1,7 +1,9 @@
 package sender
 
 import (
+	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/google/gopacket/pcap"
 )
@@ -12,8 +14,21 @@ type Interface interface {
 	Close()
 }
 
+// Batcher is an optional extension of Interface for senders that can inject
+// multiple frames in a single system call. Absence of this interface is not
+// an error — callers must fall back to repeated Send calls.
+type Batcher interface {
+	SendBatch(frames [][]byte) (int, error)
+}
+
+// ErrNotSupported is returned by optional operations that are not available
+// on the current platform.
+var ErrNotSupported = errors.New("operation not supported on this platform")
+
 // Sender injects raw packet frames onto a network interface using libpcap.
+// mu serialises WritePacketData because pcap handles are not goroutine-safe.
 type Sender struct {
+	mu     sync.Mutex
 	handle *pcap.Handle
 	iface  string
 }
@@ -42,7 +57,10 @@ func (s *Sender) Send(data []byte) error {
 	if len(data) > 65535 {
 		return fmt.Errorf("packet too large: %d bytes (maximum 65535)", len(data))
 	}
-	if err := s.handle.WritePacketData(data); err != nil {
+	s.mu.Lock()
+	err := s.handle.WritePacketData(data)
+	s.mu.Unlock()
+	if err != nil {
 		return fmt.Errorf("write packet to %s: %w", s.iface, err)
 	}
 	return nil

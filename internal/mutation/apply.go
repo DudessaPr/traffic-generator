@@ -130,6 +130,10 @@ func Apply(rawData []byte, plan Plan, linkType layers.LinkType) ([]byte, error) 
 		return rawData, nil
 	}
 
+	if hasEth && len(plan.DstMAC) == 6 {
+		copy(eth.DstMAC, plan.DstMAC)
+	}
+
 	// Mutate the IP layer and keep a reference for checksum pseudo-header binding.
 	var nl gopacket.NetworkLayer
 	if hasIP4 {
