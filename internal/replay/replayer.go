@@ -21,8 +21,8 @@ import (
 // processedSession holds pre-mutated packet bytes for one session.
 // Used when cfg.PreProcess is true to move gopacket overhead off the hot path.
 type processedSession struct {
-	frames      [][]byte
-	lastFINRST  bool // true if the last original packet was TCP FIN or RST
+	frames     [][]byte
+	lastFINRST bool // true if the last original packet was TCP FIN or RST
 }
 
 // timestampedFrame is one pre-mutated frame with its original capture timestamp.
@@ -34,12 +34,12 @@ type timestampedFrame struct {
 
 // Replayer orchestrates timing-accurate replay of sessions.
 type Replayer struct {
-	cfg        config.ReplayConfig
-	mutator    *mutation.Mutator
-	sender     sender.Interface
-	mc         *metrics.Collector
-	limiter    *rateLimiter         // nil = no packet-rate limiting
-	cpsLimiter *ratelimit.CPSLimiter // nil = no CPS limiting
+	cfg         config.ReplayConfig
+	mutator     *mutation.Mutator
+	sender      sender.Interface
+	mc          *metrics.Collector
+	rateLimiter *rateLimiter          // nil = no packet-rate limiting
+	cpsLimiter  *ratelimit.CPSLimiter // nil = no CPS limiting
 }
 
 // New creates a Replayer wired to the given dependencies.
@@ -61,7 +61,7 @@ func (r *Replayer) Run(ctx context.Context, sessions []*session.Session) error {
 	if err != nil {
 		return fmt.Errorf("rate multiplier: %w", err)
 	}
-	r.limiter, err = newRateLimiter(ctx, effectiveRate, r.cfg.RateRamp)
+	r.rateLimiter, err = newRateLimiter(ctx, effectiveRate, r.cfg.RateRamp)
 	if err != nil {
 		return err
 	}
@@ -126,6 +126,10 @@ func (r *Replayer) runSequential(ctx context.Context, sessions []*session.Sessio
 
 // runParallel replays sessions with up to cfg.Workers concurrent goroutines.
 func (r *Replayer) runParallel(ctx context.Context, sessions []*session.Session, processed []*processedSession) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	// in case of one session returns error, we stop everything
+
 	workers := r.cfg.Workers
 	if workers <= 0 {
 		workers = 4
@@ -146,7 +150,7 @@ loop:
 		select {
 		case <-ctx.Done():
 			break loop
-		case sem <- struct{}{}:
+		case sem <- struct{}{}: // take semaphore slot
 		}
 		if err := r.cpsLimiter.Wait(ctx); err != nil {
 			<-sem
@@ -164,9 +168,13 @@ loop:
 			} else {
 				err = r.replaySession(ctx, s)
 			}
-			if err != nil {
+			if err != nil &&
+				err != context.Canceled &&
+				err != context.DeadlineExceeded {
+				r.mc.C.Errors.Add(1) // только неожиданные ошибки
 				select {
 				case errc <- err:
+					cancel()
 				default:
 				}
 			}
@@ -191,6 +199,87 @@ func pktHasTCPFINorRST(pkt *session.Packet) bool {
 	if tl := p.TransportLayer(); tl != nil {
 		if tcp, ok := tl.(*layers.TCP); ok {
 			return tcp.FIN || tcp.RST
+		}
+	}
+	return false
+}
+
+// updateFlowMetrics after each session
+func (r *Replayer) updateFlowMetrics(s *session.Session) {
+	r.mc.C.ActiveFlows.Add(-1)
+	if s.Proto != 6 {
+		r.mc.C.OpenFlows.Add(-1) // UDP/ICMP
+		// UDP/ICMP flows have no open/closed markers so we close flow when done with the session
+	}
+	// TCP without FIN/RST → OpenFlows not decremented to tack open TCP flows
+}
+
+// trackTCPClose check packet for FIN/RST and decrement OpenFlows
+// return true if FIN/RST found
+func (r *Replayer) trackTCPClose(s *session.Session, pkt *session.Packet, seen bool) bool {
+	if s.Proto == 6 && !seen && pktHasTCPFINorRST(pkt) {
+		r.mc.C.OpenFlows.Add(-1)
+		return true
+	}
+	return seen
+}
+
+func (r *Replayer) trackSessionClose(s *session.Session) {
+	for _, pkt := range s.Packets {
+		if r.trackTCPClose(s, pkt, false) {
+			break
+		}
+	}
+}
+
+// startSession increment metrics when start session
+func (r *Replayer) startSession() {
+	r.mc.C.FlowsStarted.Add(1)
+	r.mc.C.ActiveFlows.Add(1)
+	r.mc.C.OpenFlows.Add(1)
+}
+
+// sendBurstFrames sends pre-mutated frames via addFrame.
+// Returns (cancelled bool).
+func (r *Replayer) sendBurstFrames(
+	ctx context.Context,
+	frames [][]byte,
+	addFrame func([]byte) bool,
+) bool {
+	for _, frame := range frames {
+		if ctx.Err() != nil {
+			return true
+		}
+		if !addFrame(frame) {
+			return true
+		}
+	}
+	return false
+}
+
+// sendBurstPackets mutates and sends packets via addFrame.
+// Returns (cancelled bool, finRSTSeen bool).
+func (r *Replayer) sendBurstPackets(
+	ctx context.Context,
+	s *session.Session,
+	plan mutation.Plan,
+	addFrame func([]byte) bool,
+) (cancelled bool) {
+	for _, pkt := range s.Packets {
+		if ctx.Err() != nil {
+			return true
+		}
+		if len(pkt.Data) == 0 {
+			r.mc.C.EmptyPackets.Add(1)
+			continue
+		}
+		data, err := mutation.Apply(pkt.Data, plan, layers.LinkType(pkt.LinkType))
+		if err != nil {
+			r.mc.C.Errors.Add(1)
+			continue
+		}
+		if !addFrame(data) {
+			return true
 		}
 	}
 	return false
@@ -240,8 +329,8 @@ func (r *Replayer) runBurst(ctx context.Context, sessions []*session.Session, pr
 	// addFrame rate-limits (if configured) and enqueues one frame; returns
 	// false only if the context is cancelled.
 	addFrame := func(data []byte) bool {
-		if r.limiter != nil {
-			if err := r.limiter.Wait(ctx, len(data)); err != nil {
+		if r.rateLimiter != nil {
+			if err := r.rateLimiter.Wait(ctx, len(data)); err != nil {
 				return false
 			}
 		}
@@ -257,36 +346,17 @@ func (r *Replayer) runBurst(ctx context.Context, sessions []*session.Session, pr
 			return ctx.Err()
 		}
 
-		// — processed path (pre-mutated frames) —
+		// processed path
 		if processed != nil {
 			ps := processed[i]
 			if ps == nil || len(ps.frames) == 0 {
 				continue
 			}
-			r.mc.C.FlowsStarted.Add(1)
-			r.mc.C.ActiveFlows.Add(1)
-			r.mc.C.OpenFlows.Add(1)
-			cancelled := false
-			for _, frame := range ps.frames {
-				if ctx.Err() != nil {
-					cancelled = true
-					break
-				}
-				if !addFrame(frame) {
-					cancelled = true
-					break
-				}
-			}
+			r.startSession()
+			cancelled := r.sendBurstFrames(ctx, ps.frames, addFrame)
 			flushBuf()
-			r.mc.C.ActiveFlows.Add(-1)
-			openDec := false
-			if ps.lastFINRST {
-				r.mc.C.OpenFlows.Add(-1)
-				openDec = true
-			}
-			if !openDec {
-				r.mc.C.OpenFlows.Add(-1)
-			}
+			r.trackSessionClose(s)
+			r.updateFlowMetrics(s)
 			if cancelled {
 				return ctx.Err()
 			}
@@ -294,49 +364,22 @@ func (r *Replayer) runBurst(ctx context.Context, sessions []*session.Session, pr
 			continue
 		}
 
-		// — on-the-fly mutation path —
+		// on-the-fly path
 		if len(s.Packets) == 0 {
 			continue
 		}
-		r.mc.C.FlowsStarted.Add(1)
-		r.mc.C.ActiveFlows.Add(1)
-		r.mc.C.OpenFlows.Add(1)
-		openDecremented := false
+		r.startSession()
 		plan := r.mutator.PlanFor(s)
-		cancelled := false
-		for _, pkt := range s.Packets {
-			if ctx.Err() != nil {
-				cancelled = true
-				break
-			}
-			if len(pkt.Data) == 0 {
-				r.mc.C.EmptyPackets.Add(1)
-				continue
-			}
-			data, err := mutation.Apply(pkt.Data, plan, layers.LinkType(pkt.LinkType))
-			if err != nil {
-				r.mc.C.Errors.Add(1)
-				continue
-			}
-			if !addFrame(data) {
-				cancelled = true
-				break
-			}
-		}
+		cancelled := r.sendBurstPackets(ctx, s, plan, addFrame)
 		flushBuf()
-		r.mc.C.ActiveFlows.Add(-1)
-		if !cancelled && s.Proto == 6 && pktHasTCPFINorRST(s.Packets[len(s.Packets)-1]) {
-			r.mc.C.OpenFlows.Add(-1)
-			openDecremented = true
-		}
-		if !openDecremented {
-			r.mc.C.OpenFlows.Add(-1)
-		}
+		r.trackSessionClose(s)
+		r.updateFlowMetrics(s)
 		if cancelled {
 			return ctx.Err()
 		}
 		r.mc.C.SessionsDone.Add(1)
 	}
+
 	return nil
 }
 
@@ -356,6 +399,7 @@ func (r *Replayer) runPcap(ctx context.Context, sessions []*session.Session) err
 		defer func() {
 			r.mc.C.ActiveFlows.Add(-numFlows)
 			r.mc.C.OpenFlows.Add(-numFlows)
+			r.mc.C.SessionsDone.Add(numFlows)
 		}()
 	}
 
@@ -415,12 +459,6 @@ func (r *Replayer) runPcap(ctx context.Context, sessions []*session.Session) err
 			}
 		}
 		r.sendRaw(ctx, frame.data)
-	}
-
-	for _, s := range sessions {
-		if len(s.Packets) > 0 {
-			r.mc.C.SessionsDone.Add(1)
-		}
 	}
 	return nil
 }
@@ -492,26 +530,18 @@ func (r *Replayer) replaySession(ctx context.Context, s *session.Session) error 
 	if len(s.Packets) == 0 {
 		return nil
 	}
-	r.mc.C.FlowsStarted.Add(1)
-	r.mc.C.ActiveFlows.Add(1)
-	r.mc.C.OpenFlows.Add(1)
+	r.startSession()
 	finRSTSeen := false
 	defer func() {
-		r.mc.C.ActiveFlows.Add(-1)
-		if !finRSTSeen {
-			r.mc.C.OpenFlows.Add(-1)
-		}
+		r.updateFlowMetrics(s)
 	}()
 
 	plan := r.mutator.PlanFor(s)
 	origin := s.Packets[0].Timestamp
 	wallStart := time.Now()
 
-	// Allocate one timer for the whole session; reset it per-packet instead of
-	// allocating a new channel each time (time.After leaks a goroutine until it fires).
 	timer := time.NewTimer(0)
 	defer timer.Stop()
-	// Drain the initial tick so the first packet is never accidentally delayed.
 	if !timer.Stop() {
 		<-timer.C
 	}
@@ -520,20 +550,16 @@ func (r *Replayer) replaySession(ctx context.Context, s *session.Session) error 
 		capOffset := pkt.Timestamp.Sub(origin)
 		if r.cfg.Speed > 0 {
 			capOffset = time.Duration(float64(capOffset) / r.cfg.Speed)
-			// A very small speed (e.g. 0.0001) can push capOffset past the
-			// int64 nanosecond limit (~292 years) and wrap negative. Cap at
-			// 1 hour which is already far beyond any realistic replay gap.
 			if capOffset > time.Hour {
 				capOffset = time.Hour
 			}
 		} else {
-			capOffset = 0 // burst inside session
+			capOffset = 0
 		}
 		if wait := time.Until(wallStart.Add(capOffset)); wait > 0 {
 			timer.Reset(wait)
 			select {
 			case <-ctx.Done():
-				// Stop and drain before returning so no goroutine is left waiting.
 				if !timer.Stop() {
 					<-timer.C
 				}
@@ -542,10 +568,7 @@ func (r *Replayer) replaySession(ctx context.Context, s *session.Session) error 
 			}
 		}
 		r.sendPacket(ctx, pkt, plan)
-	}
-	if s.Proto == 6 && pktHasTCPFINorRST(s.Packets[len(s.Packets)-1]) {
-		r.mc.C.OpenFlows.Add(-1)
-		finRSTSeen = true
+		finRSTSeen = r.trackTCPClose(s, pkt, finRSTSeen)
 	}
 	r.mc.C.SessionsDone.Add(1)
 	return nil
@@ -567,8 +590,8 @@ func (r *Replayer) sendPacket(ctx context.Context, pkt *session.Packet, plan mut
 
 // sendRaw injects one already-mutated frame, enforcing the rate limit if set.
 func (r *Replayer) sendRaw(ctx context.Context, data []byte) {
-	if r.limiter != nil {
-		if err := r.limiter.Wait(ctx, len(data)); err != nil {
+	if r.rateLimiter != nil {
+		if err := r.rateLimiter.Wait(ctx, len(data)); err != nil {
 			return // context cancelled — do not count as an error
 		}
 	}

@@ -10,7 +10,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/spf13/cobra"
 	"tgen/internal/config"
 	"tgen/internal/metrics"
 	"tgen/internal/mutation"
@@ -19,22 +18,24 @@ import (
 	"tgen/internal/replay"
 	"tgen/internal/sender"
 	"tgen/internal/session"
+
+	"github.com/spf13/cobra"
 )
 
 var runFlags struct {
-	ifaces    []string
-	targetIP  string
+	ifaces     []string
+	targetIP   string
 	senderType string
-	speed     float64
-	mode      string
-	loop      bool
-	loopCount int
-	workers   int
+	speed      float64
+	mode       string
+	loop       bool
+	loopCount  int
+	workers    int
 	// IP mutation
-	srcIP     string
-	dstIP     string
-	srcIPPool []string
-	dstIPPool []string
+	srcIP       string
+	dstIP       string
+	srcIPPool   []string
+	dstIPPool   []string
 	ipPoolLimit int
 	// port mutation
 	srcPortMin uint16
@@ -79,13 +80,16 @@ func init() {
 		"auto-resolve outbound interface and gateway MAC for this destination IP")
 	f.StringVar(&runFlags.senderType, "sender", "",
 		"packet injection backend: pcap (default) or raw (Linux AF_PACKET)")
+
 	f.Float64VarP(&runFlags.speed, "speed", "s", 1.0,
 		"replay speed multiplier (0=burst, 1=real-time, 2=2×)")
 	f.StringVarP(&runFlags.mode, "mode", "m", "sequential",
 		"sequential|parallel|burst|pcap")
 	f.BoolVarP(&runFlags.loop, "loop", "l", false, "replay indefinitely")
 	f.IntVar(&runFlags.loopCount, "loop-count", 0, "number of replay passes (0=once)")
+
 	f.IntVar(&runFlags.workers, "workers", 4, "goroutine count for parallel mode")
+
 	f.StringVar(&runFlags.srcIP, "src-ip", "", "override source IP for all sessions")
 	f.StringVar(&runFlags.dstIP, "dst-ip", "", "override destination IP for all sessions")
 	f.StringSliceVar(&runFlags.srcIPPool, "src-ip-pool", nil,
@@ -94,35 +98,44 @@ func init() {
 		"destination IP pool: random IP per session (CIDR or plain IP, repeatable)")
 	f.IntVar(&runFlags.ipPoolLimit, "ip-pool-limit", 0,
 		"max hosts expanded per CIDR in the IP pool (0=default 256, max 65536)")
+
 	f.Uint16Var(&runFlags.srcPortMin, "src-port-min", 0,
 		"randomise source port from this value")
 	f.Uint16Var(&runFlags.srcPortMax, "src-port-max", 0,
 		"randomise source port up to this value")
 	f.Uint16Var(&runFlags.dstPort, "dst-port", 0,
 		"override destination port for all sessions")
+
 	f.Uint8Var(&runFlags.ttl, "ttl", 0,
 		"override TTL (IPv4) / HopLimit (IPv6); 0=keep original")
 	f.Uint8Var(&runFlags.dscp, "dscp", 0, "override DSCP (0–63); 0=keep original")
+
 	f.StringVar(&runFlags.tcpSetFlags, "tcp-set-flags", "",
 		"TCP flags to force on, comma-separated: SYN,ACK,FIN,RST,PSH,URG")
 	f.StringVar(&runFlags.tcpClearFlags, "tcp-clear-flags", "",
 		"TCP flags to force off, comma-separated: SYN,ACK,FIN,RST,PSH,URG")
 	f.Uint16Var(&runFlags.tcpWindow, "tcp-window", 0,
 		"override TCP window size; 0=keep original")
+
 	f.StringVar(&runFlags.rate, "rate", "",
 		"rate limit: e.g. 100kpps, 1gbps, 50000pps, 100mbps")
 	f.StringVar(&runFlags.rateRamp, "rate-ramp", "",
 		"linearly ramp from 0 to --rate over this duration (e.g. 60s)")
+
 	f.Float64Var(&runFlags.cps, "cps", 0,
 		"connections per second: new sessions to start per second (0=unlimited; sequential/parallel only)")
 	f.Float64Var(&runFlags.multiplier, "multiplier", 1.0,
 		"rate multiplier applied to --rate and --cps (e.g. 2.0 doubles the effective rate)")
+
 	f.BoolVar(&runFlags.preProcess, "pre-process", false,
 		"pre-mutate all packets before replay starts (burst/parallel only)")
+
 	f.BoolVar(&runFlags.ipPoolPerIter, "ip-pool-per-iter", false,
 		"clear mutation plan cache at start of each loop iteration for fresh IP assignments")
+
 	f.IntVar(&runFlags.batchSize, "batch-size", 32,
 		"frames per SendBatch call in burst mode (1–256; requires AF_PACKET raw sender)")
+
 	f.StringVar(&runFlags.minDuration, "min-duration", "",
 		"skip sessions shorter than this (e.g. 500ms)")
 	f.StringVar(&runFlags.maxDuration, "max-duration", "",
@@ -131,8 +144,10 @@ func init() {
 		"skip sessions that start before this time (RFC 3339)")
 	f.StringVar(&runFlags.startBefore, "start-before", "",
 		"skip sessions that start after this time (RFC 3339)")
+
 	f.StringSliceVar(&runFlags.protos, "proto", nil,
 		"include only these protocols (tcp,udp,icmp)")
+
 	rootCmd.AddCommand(runCmd)
 }
 
@@ -244,6 +259,7 @@ func buildSender(cfg *config.Config) (sender.Interface, error) {
 		return nil, fmt.Errorf("no interface specified")
 	}
 
+	// TODO: add functionality for RawSender (linux sockets) to be able to send to many interfaces instead of just one.
 	switch strings.ToLower(cfg.Sender) {
 	case "raw":
 		if len(ifaces) != 1 {
@@ -280,7 +296,7 @@ func buildConfig(args []string) (*config.Config, error) {
 	}
 
 	if len(runFlags.ifaces) == 0 && runFlags.targetIP == "" {
-		return nil, fmt.Errorf("--interface (or --target-ip) is required when no config file is provided")
+		return nil, fmt.Errorf("--interface or --target-ip is required when no config file is provided")
 	}
 	if len(args) == 0 {
 		return nil, fmt.Errorf("at least one PCAP file is required")
