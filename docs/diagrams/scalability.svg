@@ -1,0 +1,142 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 675">
+  <defs>
+    <style>text{font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;}</style>
+  </defs>
+
+  <rect width="1200" height="675" fill="#fff"/>
+
+  <!-- Title -->
+  <text x="600" y="30" text-anchor="middle" font-size="21" font-weight="700" fill="#111827">tgen — Scalability Options</text>
+
+  <!-- ===== CHART AREA SETUP ===== -->
+  <!-- Bar chart: x=240 start, x=990 end (750px usable) -->
+  <!-- Scale: 1 M pps ≈ 37.5px, capped at 20 M pps display -->
+
+  <!-- Y-axis label -->
+  <text x="14" y="300" font-size="11" fill="#6b7280" font-weight="600" transform="rotate(-90,14,300)">Throughput (indicative) →</text>
+
+  <!-- X-axis scale -->
+  <line x1="240" y1="510" x2="1010" y2="510" stroke="#e5e7eb" stroke-width="1.5"/>
+  <text x="240" y="525" text-anchor="middle" font-size="9" fill="#9ca3af">0</text>
+  <line x1="240" y1="507" x2="240" y2="513" stroke="#9ca3af" stroke-width="1"/>
+  <text x="427" y="525" text-anchor="middle" font-size="9" fill="#9ca3af">5 M pps</text>
+  <line x1="427" y1="507" x2="427" y2="513" stroke="#9ca3af" stroke-width="1"/>
+  <text x="615" y="525" text-anchor="middle" font-size="9" fill="#9ca3af">10 M pps</text>
+  <line x1="615" y1="507" x2="615" y2="513" stroke="#9ca3af" stroke-width="1"/>
+  <text x="803" y="525" text-anchor="middle" font-size="9" fill="#9ca3af">15 M pps</text>
+  <line x1="803" y1="507" x2="803" y2="513" stroke="#9ca3af" stroke-width="1"/>
+  <text x="990" y="525" text-anchor="middle" font-size="9" fill="#9ca3af">20 M pps</text>
+  <line x1="990" y1="507" x2="990" y2="513" stroke="#9ca3af" stroke-width="1"/>
+
+  <!-- Vertical gridlines (light) -->
+  <line x1="427" y1="62" x2="427" y2="510" stroke="#f3f4f6" stroke-width="1"/>
+  <line x1="615" y1="62" x2="615" y2="510" stroke="#f3f4f6" stroke-width="1"/>
+  <line x1="803" y1="62" x2="803" y2="510" stroke="#f3f4f6" stroke-width="1"/>
+  <line x1="990" y1="62" x2="990" y2="510" stroke="#f3f4f6" stroke-width="1"/>
+
+  <!-- ===== ROW 1: Sequential (libpcap, all platforms) ===== -->
+  <rect x="35" y="66" width="200" height="58" rx="5" fill="#f8fafc" stroke="#e5e7eb" stroke-width="1"/>
+  <text x="135" y="87" text-anchor="middle" font-size="11" font-weight="700" fill="#374151">sequential</text>
+  <text x="135" y="103" text-anchor="middle" font-size="9" fill="#6b7280">--mode sequential</text>
+  <text x="135" y="117" text-anchor="middle" font-size="9" fill="#9ca3af">libpcap · macOS + Linux</text>
+  <!-- Bar: 1.9 M × 37.5 = 71.25px → 71px -->
+  <rect x="240" y="76" width="71" height="38" rx="4" fill="#6b7280"/>
+  <text x="320" y="99" font-size="11" font-weight="700" fill="#374151">~1.9 M pkt/s</text>
+  <!-- Why -->
+  <text x="560" y="91" font-size="10" fill="#6b7280">Baseline: single goroutine, original packet timing</text>
+  <text x="560" y="107" font-size="10" fill="#6b7280">per-packet mutex contention on *Sender</text>
+
+  <!-- ===== ROW 2: Burst + PreProcess ===== -->
+  <rect x="35" y="136" width="200" height="58" rx="5" fill="#f8fafc" stroke="#e5e7eb" stroke-width="1"/>
+  <text x="135" y="157" text-anchor="middle" font-size="11" font-weight="700" fill="#374151">burst + pre-process</text>
+  <text x="135" y="173" text-anchor="middle" font-size="9" fill="#6b7280">--mode burst --pre-process</text>
+  <text x="135" y="187" text-anchor="middle" font-size="9" fill="#9ca3af">all platforms</text>
+  <!-- Bar: 3.8 M × 37.5 = 142.5px → 143px -->
+  <rect x="240" y="146" width="143" height="38" rx="4" fill="#1d4ed8"/>
+  <text x="392" y="169" font-size="11" font-weight="700" fill="#374151">~3.8 M pkt/s</text>
+  <!-- Improvement marker -->
+  <rect x="240" y="185" width="143" height="8" rx="0" fill="#bfdbfe" opacity="0.5"/>
+  <text x="311" y="193" text-anchor="middle" font-size="8" fill="#1d4ed8">+2× vs sequential</text>
+  <!-- Why -->
+  <text x="560" y="161" font-size="10" fill="#6b7280">Pre-mutation removes gopacket parse+serialize from</text>
+  <text x="560" y="177" font-size="10" fill="#6b7280">hot path. No timing delays. Allocation-free send loop.</text>
+
+  <!-- ===== ROW 3: Parallel 8 goroutines ===== -->
+  <rect x="35" y="206" width="200" height="58" rx="5" fill="#f8fafc" stroke="#e5e7eb" stroke-width="1"/>
+  <text x="135" y="227" text-anchor="middle" font-size="11" font-weight="700" fill="#374151">parallel</text>
+  <text x="135" y="243" text-anchor="middle" font-size="9" fill="#6b7280">--mode parallel</text>
+  <text x="135" y="257" text-anchor="middle" font-size="9" fill="#9ca3af">all platforms</text>
+  <!-- Bar: 4.3 M × 37.5 = 161.25px → 161px -->
+  <rect x="240" y="216" width="161" height="38" rx="4" fill="#1d4ed8"/>
+  <text x="410" y="239" font-size="11" font-weight="700" fill="#374151">~4.3 M pkt/s</text>
+  <rect x="240" y="255" width="161" height="8" rx="0" fill="#bfdbfe" opacity="0.5"/>
+  <text x="320" y="263" text-anchor="middle" font-size="8" fill="#1d4ed8">~2.3× vs sequential</text>
+  <text x="560" y="231" font-size="10" fill="#6b7280">All sessions concurrently. Each goroutine mutates</text>
+  <text x="560" y="247" font-size="10" fill="#6b7280">independently. *Sender mutex serialises final write.</text>
+
+  <!-- ===== ROW 4: Raw socket (Linux) ===== -->
+  <rect x="35" y="276" width="200" height="58" rx="5" fill="#fff5f5" stroke="#fca5a5" stroke-width="1"/>
+  <text x="135" y="297" text-anchor="middle" font-size="11" font-weight="700" fill="#b91c1c">raw socket</text>
+  <text x="135" y="313" text-anchor="middle" font-size="9" fill="#b91c1c">--mode burst --sender raw</text>
+  <text x="135" y="327" text-anchor="middle" font-size="9" fill="#b91c1c" font-weight="600">Linux only</text>
+  <!-- Bar: ~6 M × 37.5 = 225px (estimated) -->
+  <rect x="240" y="286" width="225" height="38" rx="4" fill="#b91c1c"/>
+  <text x="474" y="309" font-size="11" font-weight="700" fill="#374151">~6 M pkt/s *</text>
+  <rect x="240" y="325" width="225" height="8" rx="0" fill="#fca5a5" opacity="0.5"/>
+  <text x="352" y="333" text-anchor="middle" font-size="8" fill="#b91c1c">~3× vs sequential</text>
+  <text x="560" y="301" font-size="10" fill="#6b7280">AF_PACKET SOCK_RAW → syscall.Sendto. No libpcap</text>
+  <text x="560" y="317" font-size="10" fill="#6b7280">overhead. Lower per-packet cost at &gt;1 Gbps rates.</text>
+  <text x="560" y="333" font-size="9" fill="#9ca3af">* Estimated; benchmark on target hardware with -bench=BenchmarkBurst</text>
+
+  <!-- ===== ROW 5: PoolSender ×4 NICs ===== -->
+  <rect x="35" y="346" width="200" height="58" rx="5" fill="#f5f3ff" stroke="#c4b5fd" stroke-width="1"/>
+  <text x="135" y="367" text-anchor="middle" font-size="11" font-weight="700" fill="#7c3aed">multi-NIC pool</text>
+  <text x="135" y="383" text-anchor="middle" font-size="9" fill="#7c3aed">--interface eth0,eth1,eth2,eth3</text>
+  <text x="135" y="397" text-anchor="middle" font-size="9" fill="#7c3aed">4 × *Sender or *RawSender</text>
+  <!-- Bar: 4×4.3 M ≈ 17 M, but show 4× of raw: 4×6=24M → capped at display 990px = ~20M -->
+  <!-- Show 4×4.3 = 17.2M → 17.2*37.5 = 645px -->
+  <rect x="240" y="356" width="645" height="38" rx="4" fill="#7c3aed"/>
+  <text x="894" y="379" font-size="11" font-weight="700" fill="#374151">N × per-NIC pps</text>
+  <rect x="240" y="395" width="645" height="8" rx="0" fill="#c4b5fd" opacity="0.5"/>
+  <text x="562" y="403" text-anchor="middle" font-size="8" fill="#7c3aed">linear scaling per NIC (atomic counter only)</text>
+  <text x="900" y="371" font-size="10" fill="#6b7280">*PoolSender rounds-robin across N NICs.</text>
+  <text x="900" y="387" font-size="10" fill="#6b7280">Single atomic.Add per packet, no mutex.</text>
+
+  <!-- ===== ROW 6: Multiple machines ===== -->
+  <rect x="35" y="416" width="200" height="58" rx="5" fill="#f0fdf4" stroke="#86efac" stroke-width="1"/>
+  <text x="135" y="437" text-anchor="middle" font-size="11" font-weight="700" fill="#166534">multiple machines</text>
+  <text x="135" y="453" text-anchor="middle" font-size="9" fill="#166534">M machines × N NICs each</text>
+  <text x="135" y="467" text-anchor="middle" font-size="9" fill="#166534">orchestrated externally</text>
+  <!-- Bar: M×N×6M → very large, truncate with "..." -->
+  <rect x="240" y="426" width="750" height="38" rx="4" fill="#166534"/>
+  <!-- Truncation indicator -->
+  <text x="990" y="449" text-anchor="middle" font-size="16" font-weight="700" fill="#166534">▶▶▶</text>
+  <rect x="240" y="465" width="750" height="8" rx="0" fill="#bbf7d0" opacity="0.5"/>
+  <text x="615" y="473" text-anchor="middle" font-size="8" fill="#166534">M × N × single-NIC throughput (unlimited horizontal scaling)</text>
+
+  <!-- ===== LEGEND / NOTES ===== -->
+  <rect x="12" y="540" width="1176" height="122" rx="7" fill="#f8fafc" stroke="#e5e7eb" stroke-width="1"/>
+  <text x="600" y="558" text-anchor="middle" font-size="12" font-weight="700" fill="#374151">Practical scaling guide</text>
+
+  <!-- 3 columns -->
+  <rect x="20" y="565" width="370" height="88" rx="6" fill="#eff6ff" stroke="#bfdbfe" stroke-width="1"/>
+  <text x="205" y="582" text-anchor="middle" font-size="11" font-weight="700" fill="#1d4ed8">Vertical scaling (faster per NIC)</text>
+  <text x="30" y="598" font-size="10" fill="#374151">1. Use --mode burst for max raw throughput</text>
+  <text x="30" y="614" font-size="10" fill="#374151">2. Add --pre-process to move gopacket off hot path</text>
+  <text x="30" y="630" font-size="10" fill="#374151">3. On Linux: --sender raw for AF_PACKET injection</text>
+  <text x="30" y="646" font-size="10" fill="#374151">4. Use --mode parallel to leverage multiple CPU cores</text>
+
+  <rect x="408" y="565" width="384" height="88" rx="6" fill="#fef3c7" stroke="#fcd34d" stroke-width="1"/>
+  <text x="600" y="582" text-anchor="middle" font-size="11" font-weight="700" fill="#b45309">Horizontal scaling (more NICs)</text>
+  <text x="418" y="598" font-size="10" fill="#374151">1. --interface eth0,eth1,… to use N NICs in parallel</text>
+  <text x="418" y="614" font-size="10" fill="#374151">2. Each NIC gets ~1/N of packets via round-robin</text>
+  <text x="418" y="630" font-size="10" fill="#374151">3. Combine with --sender raw for maximum per-NIC rate</text>
+  <text x="418" y="646" font-size="10" fill="#374151">4. NIC bandwidth is typically the final limit</text>
+
+  <rect x="810" y="565" width="370" height="88" rx="6" fill="#f5f3ff" stroke="#c4b5fd" stroke-width="1"/>
+  <text x="995" y="582" text-anchor="middle" font-size="11" font-weight="700" fill="#7c3aed">Rate shaping (--rate / --rate-ramp)</text>
+  <text x="820" y="598" font-size="10" fill="#374151">Use --rate 1gbps to cap injection rate</text>
+  <text x="820" y="614" font-size="10" fill="#374151">Use --rate-ramp 10s to linearly ramp up</text>
+  <text x="820" y="630" font-size="10" fill="#374151">Token-bucket limiter (golang.org/x/time/rate)</text>
+  <text x="820" y="646" font-size="10" fill="#374151">~5% overhead vs unlimited burst at 1 Mpps</text>
+</svg>

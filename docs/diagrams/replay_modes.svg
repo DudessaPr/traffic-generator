@@ -1,0 +1,251 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 675">
+  <defs>
+    <style>text{font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;}</style>
+  </defs>
+
+  <rect width="1200" height="675" fill="#fff"/>
+
+  <!-- Title -->
+  <text x="600" y="30" text-anchor="middle" font-size="21" font-weight="700" fill="#111827">tgen — Replay Modes</text>
+
+  <!-- Time axis header -->
+  <line x1="330" y1="55" x2="1170" y2="55" stroke="#9ca3af" stroke-width="1.5"/>
+  <text x="600" y="50" text-anchor="middle" font-size="10" fill="#9ca3af">time →</text>
+  <!-- Tick marks -->
+  <line x1="330" y1="52" x2="330" y2="58" stroke="#9ca3af" stroke-width="1.5"/>
+  <text x="330" y="47" text-anchor="middle" font-size="9" fill="#9ca3af">t=0</text>
+  <line x1="580" y1="52" x2="580" y2="58" stroke="#9ca3af" stroke-width="1"/>
+  <line x1="830" y1="52" x2="830" y2="58" stroke="#9ca3af" stroke-width="1"/>
+  <line x1="1080" y1="52" x2="1080" y2="58" stroke="#9ca3af" stroke-width="1"/>
+  <line x1="1170" y1="52" x2="1170" y2="58" stroke="#9ca3af" stroke-width="1.5"/>
+  <text x="1170" y="47" text-anchor="middle" font-size="9" fill="#9ca3af">tmax</text>
+
+  <!-- Session color key (top-right) -->
+  <rect x="940" y="15" width="245" height="28" rx="5" fill="#f9fafb" stroke="#e5e7eb" stroke-width="1"/>
+  <rect x="950" y="22" width="14" height="14" rx="2" fill="#1d4ed8"/>
+  <text x="968" y="33" font-size="10" fill="#374151">Session 1</text>
+  <rect x="1025" y="22" width="14" height="14" rx="2" fill="#166534"/>
+  <text x="1043" y="33" font-size="10" fill="#374151">Session 2</text>
+  <rect x="1100" y="22" width="14" height="14" rx="2" fill="#b45309"/>
+  <text x="1118" y="33" font-size="10" fill="#374151">Session 3</text>
+
+  <!-- ======================================================= -->
+  <!-- MODE 1: SEQUENTIAL                                        -->
+  <!-- ======================================================= -->
+  <rect x="8" y="63" width="1184" height="118" rx="8" fill="#eff6ff" stroke="#bfdbfe" stroke-width="1"/>
+  <!-- Mode label -->
+  <rect x="16" y="71" width="300" height="100" rx="6" fill="#1e40af"/>
+  <text x="166" y="94" text-anchor="middle" font-size="15" font-weight="700" fill="#fff">sequential</text>
+  <text x="166" y="112" text-anchor="middle" font-size="10" fill="#bfdbfe">--mode sequential</text>
+  <text x="166" y="128" text-anchor="middle" font-size="10" fill="#bfdbfe">Sessions replayed one at a time.</text>
+  <text x="166" y="144" text-anchor="middle" font-size="10" fill="#bfdbfe">Packet timing preserved per session.</text>
+  <text x="166" y="160" text-anchor="middle" font-size="10" fill="#93c5fd">Total time = Σ session durations</text>
+
+  <!-- Session 1 bar (blue) -->
+  <rect x="330" y="80" width="220" height="35" rx="4" fill="#1d4ed8"/>
+  <text x="440" y="102" text-anchor="middle" font-size="10" font-weight="600" fill="#fff">Session 1</text>
+  <!-- packet marks inside S1 bar -->
+  <line x1="375" y1="80" x2="375" y2="115" stroke="#bfdbfe" stroke-width="1"/>
+  <line x1="430" y1="80" x2="430" y2="115" stroke="#bfdbfe" stroke-width="1"/>
+  <line x1="495" y1="80" x2="495" y2="115" stroke="#bfdbfe" stroke-width="1"/>
+
+  <!-- Gap indicator S1→S2 -->
+  <line x1="550" y1="97" x2="595" y2="97" stroke="#6b7280" stroke-width="1" stroke-dasharray="3,2"/>
+  <text x="572" y="92" text-anchor="middle" font-size="8" fill="#9ca3af">wait</text>
+
+  <!-- Session 2 bar (green) -->
+  <rect x="596" y="80" width="190" height="35" rx="4" fill="#166534"/>
+  <text x="691" y="102" text-anchor="middle" font-size="10" font-weight="600" fill="#fff">Session 2</text>
+  <line x1="640" y1="80" x2="640" y2="115" stroke="#bbf7d0" stroke-width="1"/>
+  <line x1="686" y1="80" x2="686" y2="115" stroke="#bbf7d0" stroke-width="1"/>
+  <line x1="748" y1="80" x2="748" y2="115" stroke="#bbf7d0" stroke-width="1"/>
+
+  <!-- Gap indicator S2→S3 -->
+  <line x1="786" y1="97" x2="830" y2="97" stroke="#6b7280" stroke-width="1" stroke-dasharray="3,2"/>
+  <text x="808" y="92" text-anchor="middle" font-size="8" fill="#9ca3af">wait</text>
+
+  <!-- Session 3 bar (orange) -->
+  <rect x="831" y="80" width="210" height="35" rx="4" fill="#b45309"/>
+  <text x="936" y="102" text-anchor="middle" font-size="10" font-weight="600" fill="#fff">Session 3</text>
+  <line x1="878" y1="80" x2="878" y2="115" stroke="#fed7aa" stroke-width="1"/>
+  <line x1="934" y1="80" x2="934" y2="115" stroke="#fed7aa" stroke-width="1"/>
+  <line x1="998" y1="80" x2="998" y2="115" stroke="#fed7aa" stroke-width="1"/>
+
+  <!-- Done marker -->
+  <line x1="1041" y1="75" x2="1041" y2="120" stroke="#9ca3af" stroke-width="1" stroke-dasharray="4,2"/>
+  <text x="1043" y="90" font-size="8" fill="#9ca3af">done</text>
+
+  <!-- Row 1 timing annotation (bottom) -->
+  <line x1="330" y1="125" x2="1041" y2="125" stroke="#6b7280" stroke-width="1"/>
+  <polygon points="330,122 330,128 322,125" fill="#6b7280"/>
+  <polygon points="1041,122 1041,128 1049,125" fill="#6b7280"/>
+  <text x="685" y="139" text-anchor="middle" font-size="9" fill="#374151">total elapsed ≈ T₁ + T₂ + T₃</text>
+
+  <!-- ======================================================= -->
+  <!-- MODE 2: PARALLEL                                          -->
+  <!-- ======================================================= -->
+  <rect x="8" y="190" width="1184" height="140" rx="8" fill="#fef3c7" stroke="#fcd34d" stroke-width="1"/>
+  <rect x="16" y="198" width="300" height="124" rx="6" fill="#b45309"/>
+  <text x="166" y="221" text-anchor="middle" font-size="15" font-weight="700" fill="#fff">parallel</text>
+  <text x="166" y="240" text-anchor="middle" font-size="10" fill="#fed7aa">--mode parallel</text>
+  <text x="166" y="256" text-anchor="middle" font-size="10" fill="#fed7aa">Sessions replay in goroutines.</text>
+  <text x="166" y="272" text-anchor="middle" font-size="10" fill="#fed7aa">All sessions start concurrently.</text>
+  <text x="166" y="288" text-anchor="middle" font-size="10" fill="#fed7aa">Timing preserved per session.</text>
+  <text x="166" y="304" text-anchor="middle" font-size="10" fill="#fde68a">Total time ≈ max(session duration)</text>
+
+  <!-- S1 goroutine row -->
+  <text x="340" y="209" font-size="9" fill="#6b7280">goroutine 1</text>
+  <rect x="330" y="211" width="220" height="28" rx="4" fill="#1d4ed8"/>
+  <text x="440" y="230" text-anchor="middle" font-size="10" font-weight="600" fill="#fff">Session 1</text>
+  <line x1="376" y1="211" x2="376" y2="239" stroke="#bfdbfe" stroke-width="1"/>
+  <line x1="430" y1="211" x2="430" y2="239" stroke="#bfdbfe" stroke-width="1"/>
+  <line x1="495" y1="211" x2="495" y2="239" stroke="#bfdbfe" stroke-width="1"/>
+
+  <!-- S2 goroutine row -->
+  <text x="340" y="251" font-size="9" fill="#6b7280">goroutine 2</text>
+  <rect x="330" y="253" width="195" height="28" rx="4" fill="#166534"/>
+  <text x="427" y="272" text-anchor="middle" font-size="10" font-weight="600" fill="#fff">Session 2</text>
+  <line x1="372" y1="253" x2="372" y2="281" stroke="#bbf7d0" stroke-width="1"/>
+  <line x1="422" y1="253" x2="422" y2="281" stroke="#bbf7d0" stroke-width="1"/>
+  <line x1="478" y1="253" x2="478" y2="281" stroke="#bbf7d0" stroke-width="1"/>
+
+  <!-- S3 goroutine row -->
+  <text x="340" y="293" font-size="9" fill="#6b7280">goroutine 3</text>
+  <rect x="330" y="295" width="240" height="28" rx="4" fill="#b45309"/>
+  <text x="450" y="314" text-anchor="middle" font-size="10" font-weight="600" fill="#fff">Session 3</text>
+  <line x1="381" y1="295" x2="381" y2="323" stroke="#fed7aa" stroke-width="1"/>
+  <line x1="445" y1="295" x2="445" y2="323" stroke="#fed7aa" stroke-width="1"/>
+  <line x1="510" y1="295" x2="510" y2="323" stroke="#fed7aa" stroke-width="1"/>
+
+  <!-- "all start at t=0" marker -->
+  <line x1="330" y1="207" x2="330" y2="327" stroke="#374151" stroke-width="1.5" stroke-dasharray="4,2"/>
+  <text x="332" y="340" font-size="9" fill="#374151">t=0 (all start)</text>
+
+  <!-- "max done" marker -->
+  <line x1="570" y1="207" x2="570" y2="327" stroke="#374151" stroke-width="1.5" stroke-dasharray="4,2"/>
+  <text x="572" y="340" font-size="9" fill="#374151">≈ max duration</text>
+
+  <!-- Speedup annotation -->
+  <rect x="640" y="220" width="280" height="50" rx="5" fill="#fff7ed" stroke="#fed7aa" stroke-width="1"/>
+  <text x="780" y="238" text-anchor="middle" font-size="10" font-weight="600" fill="#b45309">Speedup vs sequential</text>
+  <text x="780" y="255" text-anchor="middle" font-size="10" fill="#374151">~2× for 8 goroutines (M3 Pro benchmark)</text>
+  <text x="780" y="270" text-anchor="middle" font-size="10" fill="#374151">Sender mutex is the main contention point</text>
+
+  <!-- ======================================================= -->
+  <!-- MODE 3: BURST                                             -->
+  <!-- ======================================================= -->
+  <rect x="8" y="340" width="1184" height="100" rx="8" fill="#f0fdf4" stroke="#bbf7d0" stroke-width="1"/>
+  <rect x="16" y="348" width="300" height="84" rx="6" fill="#166534"/>
+  <text x="166" y="371" text-anchor="middle" font-size="15" font-weight="700" fill="#fff">burst</text>
+  <text x="166" y="389" text-anchor="middle" font-size="10" fill="#bbf7d0">--mode burst</text>
+  <text x="166" y="405" text-anchor="middle" font-size="10" fill="#bbf7d0">No timing delays. Packets sent</text>
+  <text x="166" y="421" text-anchor="middle" font-size="10" fill="#86efac">at wire speed (max throughput).</text>
+
+  <!-- Tightly packed packets — no gaps -->
+  <!-- 12 packets × 40px = 480px, start x=330 -->
+  <rect x="330" y="358" width="40" height="30" rx="3" fill="#1d4ed8"/>
+  <rect x="372" y="358" width="40" height="30" rx="3" fill="#1d4ed8"/>
+  <rect x="414" y="358" width="40" height="30" rx="3" fill="#1d4ed8"/>
+  <rect x="456" y="358" width="40" height="30" rx="3" fill="#1d4ed8"/>
+  <rect x="498" y="358" width="40" height="30" rx="3" fill="#166534"/>
+  <rect x="540" y="358" width="40" height="30" rx="3" fill="#166534"/>
+  <rect x="582" y="358" width="40" height="30" rx="3" fill="#166534"/>
+  <rect x="624" y="358" width="40" height="30" rx="3" fill="#166534"/>
+  <rect x="666" y="358" width="40" height="30" rx="3" fill="#b45309"/>
+  <rect x="708" y="358" width="40" height="30" rx="3" fill="#b45309"/>
+  <rect x="750" y="358" width="40" height="30" rx="3" fill="#b45309"/>
+  <rect x="792" y="358" width="40" height="30" rx="3" fill="#b45309"/>
+
+  <!-- "done" marker -->
+  <line x1="832" y1="354" x2="832" y2="394" stroke="#9ca3af" stroke-width="1.5" stroke-dasharray="4,2"/>
+  <text x="834" y="368" font-size="9" fill="#9ca3af">done</text>
+
+  <!-- Annotation: much shorter total time -->
+  <rect x="870" y="350" width="315" height="60" rx="5" fill="#dcfce7" stroke="#bbf7d0" stroke-width="1"/>
+  <text x="1027" y="370" text-anchor="middle" font-size="10" font-weight="600" fill="#166534">No inter-packet gaps</text>
+  <text x="1027" y="386" text-anchor="middle" font-size="10" fill="#374151">Ignores original capture timing.</text>
+  <text x="1027" y="401" text-anchor="middle" font-size="10" fill="#374151">Compatible with --pre-process for</text>
+  <text x="1027" y="416" text-anchor="middle" font-size="10" fill="#374151">1.8× extra throughput.</text>
+
+  <!-- Burst timing bar -->
+  <line x1="330" y1="395" x2="832" y2="395" stroke="#6b7280" stroke-width="1"/>
+  <polygon points="330,392 330,398 322,395" fill="#6b7280"/>
+  <polygon points="832,392 832,398 840,395" fill="#6b7280"/>
+  <text x="581" y="427" text-anchor="middle" font-size="9" fill="#374151">much shorter than sequential</text>
+
+  <!-- ======================================================= -->
+  <!-- MODE 4: PCAP                                             -->
+  <!-- ======================================================= -->
+  <rect x="8" y="450" width="1184" height="120" rx="8" fill="#f5f3ff" stroke="#c4b5fd" stroke-width="1"/>
+  <rect x="16" y="458" width="300" height="104" rx="6" fill="#7c3aed"/>
+  <text x="166" y="481" text-anchor="middle" font-size="15" font-weight="700" fill="#fff">pcap</text>
+  <text x="166" y="499" text-anchor="middle" font-size="10" fill="#ddd6fe">--mode pcap</text>
+  <text x="166" y="515" text-anchor="middle" font-size="10" fill="#ddd6fe">All packets from all sessions</text>
+  <text x="166" y="531" text-anchor="middle" font-size="10" fill="#ddd6fe">sorted by capture timestamp.</text>
+  <text x="166" y="547" text-anchor="middle" font-size="10" fill="#ddd6fe">Inter-packet gaps = original timing.</text>
+
+  <!-- Interleaved packets with variable gaps (sorted by timestamp) -->
+  <!-- Pattern: S1 S2 S1 S3 S2 S1 S3 S2 S3 S1 S2 S3 with variable gaps -->
+  <rect x="330" y="468" width="28" height="30" rx="3" fill="#1d4ed8"/> <!-- S1 t=0 -->
+  <rect x="385" y="468" width="28" height="30" rx="3" fill="#166534"/> <!-- S2 t=55 -->
+  <rect x="425" y="468" width="28" height="30" rx="3" fill="#1d4ed8"/> <!-- S1 -->
+  <rect x="480" y="468" width="28" height="30" rx="3" fill="#b45309"/> <!-- S3 -->
+  <rect x="515" y="468" width="28" height="30" rx="3" fill="#166534"/> <!-- S2 -->
+  <rect x="570" y="468" width="28" height="30" rx="3" fill="#1d4ed8"/> <!-- S1 -->
+  <rect x="620" y="468" width="28" height="30" rx="3" fill="#b45309"/> <!-- S3 -->
+  <rect x="665" y="468" width="28" height="30" rx="3" fill="#166534"/> <!-- S2 -->
+  <rect x="730" y="468" width="28" height="30" rx="3" fill="#b45309"/> <!-- S3 -->
+  <rect x="775" y="468" width="28" height="30" rx="3" fill="#1d4ed8"/> <!-- S1 -->
+  <rect x="830" y="468" width="28" height="30" rx="3" fill="#166534"/> <!-- S2 -->
+  <rect x="900" y="468" width="28" height="30" rx="3" fill="#b45309"/> <!-- S3 -->
+
+  <!-- Variable gap annotations -->
+  <text x="357" y="508" text-anchor="middle" font-size="8" fill="#7c3aed">Δt</text>
+  <text x="406" y="508" text-anchor="middle" font-size="8" fill="#7c3aed">Δt</text>
+  <text x="452" y="508" text-anchor="middle" font-size="8" fill="#7c3aed">Δt</text>
+  <text x="497" y="508" text-anchor="middle" font-size="8" fill="#7c3aed">Δt</text>
+
+  <!-- Annotation -->
+  <rect x="960" y="460" width="225" height="80" rx="5" fill="#ede9fe" stroke="#c4b5fd" stroke-width="1"/>
+  <text x="1072" y="478" text-anchor="middle" font-size="10" font-weight="600" fill="#7c3aed">O(N·M·log(N·M)) sort</text>
+  <text x="1072" y="494" text-anchor="middle" font-size="10" fill="#374151">Pre-mutation pass before</text>
+  <text x="1072" y="510" text-anchor="middle" font-size="10" fill="#374151">replay starts. ~20% overhead</text>
+  <text x="1072" y="526" text-anchor="middle" font-size="10" fill="#374151">vs sequential (M3 Pro).</text>
+
+  <!-- ===== LEGEND ===== -->
+  <rect x="8" y="580" width="1184" height="84" rx="6" fill="#f8fafc" stroke="#e5e7eb" stroke-width="1"/>
+  <text x="24" y="598" font-size="10" font-weight="700" fill="#374151">Summary</text>
+
+  <!-- Row headers -->
+  <text x="80" y="614" text-anchor="middle" font-size="10" font-weight="600" fill="#374151">Mode</text>
+  <text x="300" y="614" text-anchor="middle" font-size="10" font-weight="600" fill="#374151">Timing</text>
+  <text x="520" y="614" text-anchor="middle" font-size="10" font-weight="600" fill="#374151">Concurrency</text>
+  <text x="750" y="614" text-anchor="middle" font-size="10" font-weight="600" fill="#374151">Throughput</text>
+  <text x="980" y="614" text-anchor="middle" font-size="10" font-weight="600" fill="#374151">Use case</text>
+
+  <line x1="16" y1="618" x2="1180" y2="618" stroke="#e5e7eb" stroke-width="1"/>
+
+  <text x="80" y="634" text-anchor="middle" font-size="10" fill="#1e40af">sequential</text>
+  <text x="300" y="634" text-anchor="middle" font-size="10" fill="#374151">original inter-pkt gaps</text>
+  <text x="520" y="634" text-anchor="middle" font-size="10" fill="#374151">single goroutine</text>
+  <text x="750" y="634" text-anchor="middle" font-size="10" fill="#374151">~1.9 M pkt/s</text>
+  <text x="980" y="634" text-anchor="middle" font-size="10" fill="#374151">realistic session replay</text>
+
+  <text x="80" y="650" text-anchor="middle" font-size="10" fill="#b45309">parallel</text>
+  <text x="300" y="650" text-anchor="middle" font-size="10" fill="#374151">per-session timing</text>
+  <text x="520" y="650" text-anchor="middle" font-size="10" fill="#374151">N goroutines (all sessions)</text>
+  <text x="750" y="650" text-anchor="middle" font-size="10" fill="#374151">~4.3 M pkt/s (8 goroutines)</text>
+  <text x="980" y="650" text-anchor="middle" font-size="10" fill="#374151">load generation</text>
+
+  <text x="80" y="654" text-anchor="middle" font-size="10" fill="#166534">burst</text>
+  <text x="300" y="654" text-anchor="middle" font-size="10" fill="#374151">no delays</text>
+  <text x="520" y="654" text-anchor="middle" font-size="10" fill="#374151">sequential, no gaps</text>
+  <text x="750" y="654" text-anchor="middle" font-size="10" fill="#374151">~3.8 M pkt/s (+pre-process)</text>
+  <text x="980" y="654" text-anchor="middle" font-size="10" fill="#374151">max rate / stress test</text>
+
+  <text x="80" y="668" text-anchor="middle" font-size="10" fill="#7c3aed">pcap</text>
+  <text x="300" y="668" text-anchor="middle" font-size="10" fill="#374151">original global order</text>
+  <text x="520" y="668" text-anchor="middle" font-size="10" fill="#374151">single goroutine</text>
+  <text x="750" y="668" text-anchor="middle" font-size="10" fill="#374151">~1.5 M pkt/s (sort overhead)</text>
+  <text x="980" y="668" text-anchor="middle" font-size="10" fill="#374151">faithful pcap re-injection</text>
+</svg>

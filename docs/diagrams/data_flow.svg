@@ -1,0 +1,157 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 675">
+  <defs>
+    <style>text{font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;}</style>
+    <marker id="arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#374151"/>
+    </marker>
+    <marker id="arrg" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#9ca3af"/>
+    </marker>
+  </defs>
+
+  <rect width="1200" height="675" fill="#fff"/>
+
+  <!-- Title -->
+  <text x="600" y="33" text-anchor="middle" font-size="21" font-weight="700" fill="#111827">tgen — Data Flow</text>
+
+  <!-- ===== CONFIG ZONE (dashed, top-right) ===== -->
+  <rect x="730" y="50" width="452" height="95" rx="8" fill="#f9fafb" stroke="#d1d5db" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="956" y="66" text-anchor="middle" font-size="10" fill="#9ca3af" font-style="italic">external / CLI</text>
+  <rect x="744" y="69" width="148" height="64" rx="7" fill="#4b5563"/>
+  <text x="818" y="95" text-anchor="middle" font-size="13" font-weight="600" fill="#fff">config.yaml</text>
+  <text x="818" y="113" text-anchor="middle" font-size="10" fill="#d1d5db">YAML config file</text>
+  <rect x="1014" y="69" width="148" height="64" rx="7" fill="#4b5563"/>
+  <text x="1088" y="95" text-anchor="middle" font-size="13" font-weight="600" fill="#fff">cmd/tgen</text>
+  <text x="1088" y="113" text-anchor="middle" font-size="10" fill="#d1d5db">entry point · wires all</text>
+  <line x1="892" y1="101" x2="1012" y2="101" stroke="#9ca3af" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrg)"/>
+  <text x="952" y="93" text-anchor="middle" font-size="9" fill="#9ca3af">--config</text>
+
+  <!-- ===== ROW 1: INPUT PIPELINE ===== -->
+  <rect x="12" y="157" width="755" height="100" rx="9" fill="#eff6ff" stroke="#bfdbfe" stroke-width="1"/>
+  <text x="26" y="172" font-size="10" font-weight="700" fill="#2563eb" letter-spacing="0.8">INPUT PIPELINE</text>
+
+  <!-- PCAP files -->
+  <rect x="26" y="174" width="138" height="68" rx="7" fill="#7c3aed"/>
+  <text x="95" y="202" text-anchor="middle" font-size="13" font-weight="600" fill="#fff">PCAP file(s)</text>
+  <text x="95" y="220" text-anchor="middle" font-size="10" fill="#ddd6fe">traffic.pcap</text>
+
+  <line x1="164" y1="208" x2="196" y2="208" stroke="#374151" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="180" y="201" text-anchor="middle" font-size="9" fill="#6b7280">raw frames</text>
+
+  <!-- pcap.ReadSessions -->
+  <rect x="198" y="174" width="172" height="68" rx="7" fill="#1d4ed8"/>
+  <text x="284" y="200" text-anchor="middle" font-size="12" font-weight="600" fill="#fff">pcap.ReadSessions()</text>
+  <text x="284" y="218" text-anchor="middle" font-size="10" fill="#bfdbfe">parse packets · group flows</text>
+
+  <line x1="370" y1="208" x2="402" y2="208" stroke="#374151" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="386" y="201" text-anchor="middle" font-size="9" fill="#6b7280">[]*Packet</text>
+
+  <!-- session.Extractor -->
+  <rect x="404" y="174" width="172" height="68" rx="7" fill="#1d4ed8"/>
+  <text x="490" y="200" text-anchor="middle" font-size="12" font-weight="600" fill="#fff">session.Extractor</text>
+  <text x="490" y="218" text-anchor="middle" font-size="10" fill="#bfdbfe">Feed() · canonical 5-tuple</text>
+
+  <line x1="576" y1="208" x2="608" y2="208" stroke="#374151" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="592" y="201" text-anchor="middle" font-size="9" fill="#6b7280">[]*Session</text>
+
+  <!-- session.Filter -->
+  <rect x="610" y="174" width="148" height="68" rx="7" fill="#1d4ed8"/>
+  <text x="684" y="200" text-anchor="middle" font-size="12" font-weight="600" fill="#fff">session.Filter</text>
+  <text x="684" y="218" text-anchor="middle" font-size="10" fill="#bfdbfe">Apply() · duration/proto</text>
+
+  <!-- ===== CONNECTOR: Filter → Replay Engine ===== -->
+  <!-- Filter bottom-center at (684, 242) → bend left → into Replay Engine top -->
+  <path d="M684,242 L684,312 L362,312 L362,388" stroke="#374151" stroke-width="1.5" fill="none" marker-end="url(#arr)"/>
+  <text x="530" y="306" text-anchor="middle" font-size="10" fill="#374151" font-style="italic">filtered []*Session</text>
+
+  <!-- cmd/tgen dashed wire into Replay Engine -->
+  <path d="M1088,133 L1088,358 L512,358 L512,388" stroke="#9ca3af" stroke-width="1.2" stroke-dasharray="5,3" fill="none" marker-end="url(#arrg)"/>
+  <text x="830" y="351" text-anchor="middle" font-size="9" fill="#9ca3af">buildConfig() · buildSender() · wires all</text>
+
+  <!-- ===== ROW 2: REPLAY PIPELINE ===== -->
+  <rect x="12" y="381" width="975" height="107" rx="9" fill="#fef3c7" stroke="#fcd34d" stroke-width="1"/>
+  <text x="26" y="396" font-size="10" font-weight="700" fill="#b45309" letter-spacing="0.8">REPLAY PIPELINE</text>
+
+  <!-- mutation.Mutator -->
+  <rect x="26" y="400" width="158" height="76" rx="7" fill="#b45309"/>
+  <text x="105" y="427" text-anchor="middle" font-size="12" font-weight="600" fill="#fff">mutation.Mutator</text>
+  <text x="105" y="445" text-anchor="middle" font-size="10" fill="#fed7aa">PlanFor() · IP pool · cache</text>
+  <text x="105" y="463" text-anchor="middle" font-size="10" fill="#fed7aa">ResetCache() on iter</text>
+
+  <line x1="184" y1="438" x2="216" y2="438" stroke="#374151" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="200" y="430" text-anchor="middle" font-size="9" fill="#6b7280">Plan</text>
+
+  <!-- Replay Engine (large box) -->
+  <rect x="218" y="390" width="278" height="92" rx="7" fill="#1e3a8a"/>
+  <text x="357" y="413" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">Replay Engine</text>
+  <text x="357" y="430" text-anchor="middle" font-size="10" fill="#bfdbfe">Mode: sequential · parallel · burst · pcap</text>
+  <text x="357" y="447" text-anchor="middle" font-size="10" fill="#bfdbfe">Timing · Speed · Rate Limiter (--rate/--rate-ramp)</text>
+  <text x="357" y="464" text-anchor="middle" font-size="10" fill="#bfdbfe">--pre-process · --ip-pool-per-iter · --loops</text>
+
+  <line x1="496" y1="436" x2="528" y2="436" stroke="#374151" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="512" y="428" text-anchor="middle" font-size="9" fill="#6b7280">raw + Plan</text>
+
+  <!-- mutation.Apply -->
+  <rect x="530" y="400" width="162" height="76" rx="7" fill="#1d4ed8"/>
+  <text x="611" y="427" text-anchor="middle" font-size="12" font-weight="600" fill="#fff">mutation.Apply()</text>
+  <text x="611" y="445" text-anchor="middle" font-size="10" fill="#bfdbfe">rewrite L2 dst MAC</text>
+  <text x="611" y="463" text-anchor="middle" font-size="10" fill="#bfdbfe">L3 src/dst IP · TTL · DSCP</text>
+
+  <line x1="692" y1="438" x2="724" y2="438" stroke="#374151" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="708" y="428" text-anchor="middle" font-size="9" fill="#6b7280">mutated bytes</text>
+
+  <!-- sender.Interface -->
+  <rect x="726" y="400" width="168" height="76" rx="7" fill="#0f766e"/>
+  <text x="810" y="427" text-anchor="middle" font-size="12" font-weight="600" fill="#fff">sender.Interface</text>
+  <text x="810" y="445" text-anchor="middle" font-size="10" fill="#99f6e4">Send(data []byte) error</text>
+  <text x="810" y="463" text-anchor="middle" font-size="10" fill="#99f6e4">*Sender · *PoolSender · *RawSender</text>
+
+  <line x1="894" y1="438" x2="926" y2="438" stroke="#374151" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="910" y="428" text-anchor="middle" font-size="9" fill="#6b7280">Send()</text>
+
+  <!-- NIC -->
+  <rect x="928" y="400" width="50" height="76" rx="7" fill="#166534"/>
+  <text x="953" y="430" text-anchor="middle" font-size="11" font-weight="600" fill="#fff">NIC</text>
+  <text x="953" y="448" text-anchor="middle" font-size="9" fill="#bbf7d0">wire</text>
+
+  <!-- ===== METRICS ===== -->
+  <rect x="1002" y="400" width="183" height="76" rx="7" fill="#374151"/>
+  <text x="1093" y="427" text-anchor="middle" font-size="12" font-weight="600" fill="#fff">metrics.Collector</text>
+  <text x="1093" y="444" text-anchor="middle" font-size="10" fill="#d1d5db">pps · bps · errors</text>
+  <text x="1093" y="461" text-anchor="middle" font-size="10" fill="#d1d5db">sessions · elapsed</text>
+  <!-- dashed stats arrow from Replay Engine to Metrics -->
+  <path d="M357,482 L357,540 L1093,540 L1093,476" stroke="#9ca3af" stroke-width="1.2" stroke-dasharray="4,3" fill="none" marker-end="url(#arrg)"/>
+  <text x="730" y="556" text-anchor="middle" font-size="9" fill="#9ca3af">PacketsSent · BytesSent · Errors atomics</text>
+
+  <!-- ===== PRE-PROCESS NOTE ===== -->
+  <rect x="12" y="510" width="340" height="60" rx="7" fill="#f0fdf4" stroke="#bbf7d0" stroke-width="1"/>
+  <text x="182" y="530" text-anchor="middle" font-size="11" font-weight="700" fill="#166534">--pre-process (burst/parallel modes)</text>
+  <text x="182" y="548" text-anchor="middle" font-size="10" fill="#374151">Pre-mutate all packets before replay loop</text>
+  <text x="182" y="564" text-anchor="middle" font-size="10" fill="#374151">Removes gopacket from hot path · ~1.8× faster</text>
+  <!-- dashed arrow from Apply back-up to pre-process note -->
+  <path d="M611,400 L611,585 L182,585 L182,570" stroke="#9ca3af" stroke-width="1" stroke-dasharray="4,3" fill="none" marker-end="url(#arrg)"/>
+
+  <!-- ===== LEGEND ===== -->
+  <rect x="12" y="601" width="1174" height="62" rx="6" fill="#f8fafc" stroke="#e5e7eb" stroke-width="1"/>
+  <text x="26" y="619" font-size="10" font-weight="700" fill="#374151">Legend</text>
+  <rect x="88" y="609" width="12" height="12" rx="2" fill="#7c3aed"/>
+  <text x="105" y="620" font-size="10" fill="#374151">Input</text>
+  <rect x="150" y="609" width="12" height="12" rx="2" fill="#1d4ed8"/>
+  <text x="167" y="620" font-size="10" fill="#374151">Processing</text>
+  <rect x="255" y="609" width="12" height="12" rx="2" fill="#1e3a8a"/>
+  <text x="272" y="620" font-size="10" fill="#374151">Engine</text>
+  <rect x="330" y="609" width="12" height="12" rx="2" fill="#b45309"/>
+  <text x="347" y="620" font-size="10" fill="#374151">Cache / State</text>
+  <rect x="445" y="609" width="12" height="12" rx="2" fill="#0f766e"/>
+  <text x="462" y="620" font-size="10" fill="#374151">Interface</text>
+  <rect x="530" y="609" width="12" height="12" rx="2" fill="#166534"/>
+  <text x="547" y="620" font-size="10" fill="#374151">Output</text>
+  <rect x="605" y="609" width="12" height="12" rx="2" fill="#374151"/>
+  <text x="622" y="620" font-size="10" fill="#374151">Metrics</text>
+  <rect x="685" y="609" width="12" height="12" rx="2" fill="#4b5563"/>
+  <text x="702" y="620" font-size="10" fill="#374151">Config / CLI</text>
+  <line x1="88" y1="648" x2="116" y2="648" stroke="#374151" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="140" y="652" font-size="10" fill="#374151">data flow</text>
+  <line x1="210" y1="648" x2="238" y2="648" stroke="#9ca3af" stroke-width="1.5" stroke-dasharray="4,2" marker-end="url(#arrg)"/>
+  <text x="264" y="652" font-size="10" fill="#374151">config / wiring</text>
+</svg>

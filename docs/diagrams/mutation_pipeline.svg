@@ -1,0 +1,157 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 675">
+  <defs>
+    <style>text{font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;}</style>
+    <marker id="arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#374151"/>
+    </marker>
+    <marker id="arrr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#b91c1c"/>
+    </marker>
+    <marker id="arrg" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#9ca3af"/>
+    </marker>
+  </defs>
+
+  <rect width="1200" height="675" fill="#fff"/>
+
+  <!-- Title -->
+  <text x="600" y="30" text-anchor="middle" font-size="21" font-weight="700" fill="#111827">tgen — Mutation Pipeline (mutation.Apply)</text>
+
+  <!-- ===== LEFT LAYER LABELS ===== -->
+  <rect x="14" y="295" width="72" height="28" rx="5" fill="#e0f2fe" stroke="#7dd3fc" stroke-width="1"/>
+  <text x="50" y="314" text-anchor="middle" font-size="10" font-weight="700" fill="#0369a1">L2 · ETH</text>
+  <rect x="14" y="365" width="72" height="28" rx="5" fill="#f0fdf4" stroke="#86efac" stroke-width="1"/>
+  <text x="50" y="384" text-anchor="middle" font-size="10" font-weight="700" fill="#166534">L3 · IP</text>
+  <rect x="14" y="445" width="72" height="28" rx="5" fill="#fef3c7" stroke="#fcd34d" stroke-width="1"/>
+  <text x="50" y="464" text-anchor="middle" font-size="10" font-weight="700" fill="#b45309">L4 · TCP/UDP</text>
+  <!-- lines from labels to boxes -->
+  <line x1="86" y1="309" x2="408" y2="322" stroke="#94a3b8" stroke-width="1" stroke-dasharray="3,2"/>
+  <line x1="86" y1="379" x2="408" y2="392" stroke="#94a3b8" stroke-width="1" stroke-dasharray="3,2"/>
+  <line x1="86" y1="459" x2="408" y2="472" stroke="#94a3b8" stroke-width="1" stroke-dasharray="3,2"/>
+
+  <!-- ===== MAIN PIPELINE (center, x=410-790, w=380) ===== -->
+
+  <!-- 1. Input -->
+  <rect x="410" y="48" width="380" height="52" rx="7" fill="#7c3aed"/>
+  <text x="600" y="70" text-anchor="middle" font-size="13" font-weight="600" fill="#fff">Input: raw []byte + Plan</text>
+  <text x="600" y="88" text-anchor="middle" font-size="10" fill="#ddd6fe">raw packet bytes · mutation.Plan (src/dst IP, ports, MAC, TTL, DSCP…)</text>
+
+  <line x1="600" y1="100" x2="600" y2="113" stroke="#374151" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- 2. Guard 1: len < 14 -->
+  <rect x="410" y="115" width="380" height="46" rx="7" fill="#b91c1c"/>
+  <text x="600" y="135" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Guard: len(raw) &lt; 14</text>
+  <text x="600" y="152" text-anchor="middle" font-size="10" fill="#fca5a5">Minimum Ethernet header = 14 bytes (dst + src MAC + EtherType)</text>
+
+  <!-- Return raw path (right) -->
+  <path d="M790,138 L850,138 L850,178 L905,178" stroke="#b91c1c" stroke-width="1.5" fill="none" stroke-dasharray="5,3" marker-end="url(#arrr)"/>
+  <rect x="907" y="160" width="218" height="36" rx="5" fill="#fee2e2" stroke="#b91c1c" stroke-width="1"/>
+  <text x="1016" y="175" text-anchor="middle" font-size="11" fill="#b91c1c" font-weight="600">→ return raw unchanged</text>
+  <text x="851" y="132" font-size="9" fill="#b91c1c">too short</text>
+
+  <line x1="600" y1="161" x2="600" y2="174" stroke="#374151" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="612" y="170" font-size="9" fill="#16a34a">≥ 14 bytes</text>
+
+  <!-- 3. Parse packet -->
+  <rect x="410" y="176" width="380" height="52" rx="7" fill="#1d4ed8"/>
+  <text x="600" y="199" text-anchor="middle" font-size="12" font-weight="600" fill="#fff">gopacket.NewPacket(raw, linkType, Default)</text>
+  <text x="600" y="216" text-anchor="middle" font-size="10" fill="#bfdbfe">Lazy decode · extracts Ethernet, IP, TCP/UDP layers</text>
+
+  <line x1="600" y1="228" x2="600" y2="241" stroke="#374151" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- 4. Guard 2: no IP layer -->
+  <rect x="410" y="243" width="380" height="46" rx="7" fill="#b91c1c"/>
+  <text x="600" y="263" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Guard: no IPv4 and no IPv6 layer</text>
+  <text x="600" y="280" text-anchor="middle" font-size="10" fill="#fca5a5">Non-IP traffic (ARP, MPLS, etc.) is passed through unchanged</text>
+
+  <!-- Return raw path (right) -->
+  <path d="M790,266 L852,266 L852,306 L905,306" stroke="#b91c1c" stroke-width="1.5" fill="none" stroke-dasharray="5,3" marker-end="url(#arrr)"/>
+  <rect x="907" y="288" width="218" height="36" rx="5" fill="#fee2e2" stroke="#b91c1c" stroke-width="1"/>
+  <text x="1016" y="303" text-anchor="middle" font-size="11" fill="#b91c1c" font-weight="600">→ return raw unchanged</text>
+  <text x="853" y="260" font-size="9" fill="#b91c1c">no IP</text>
+
+  <line x1="600" y1="289" x2="600" y2="302" stroke="#374151" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="612" y="298" font-size="9" fill="#16a34a">has IP</text>
+
+  <!-- 5. L2: Ethernet DstMAC -->
+  <rect x="410" y="304" width="380" height="52" rx="7" fill="#0369a1"/>
+  <text x="600" y="325" text-anchor="middle" font-size="12" font-weight="600" fill="#fff">L2 — Ethernet dst MAC</text>
+  <text x="600" y="343" text-anchor="middle" font-size="10" fill="#bae6fd">if Plan.DstMAC != nil → copy(eth.DstMAC, plan.DstMAC)</text>
+
+  <!-- Right annotation for DstMAC -->
+  <rect x="830" y="304" width="220" height="52" rx="6" fill="#e0f2fe" stroke="#7dd3fc" stroke-width="1"/>
+  <text x="940" y="321" text-anchor="middle" font-size="10" font-weight="600" fill="#0369a1">Used for --target-ip</text>
+  <text x="940" y="337" text-anchor="middle" font-size="10" fill="#374151">Resolved gateway MAC via</text>
+  <text x="940" y="352" text-anchor="middle" font-size="10" fill="#374151">ARP cache (netutil.Resolve)</text>
+
+  <line x1="600" y1="356" x2="600" y2="369" stroke="#374151" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- 6. L3: IP mutation (IPv4 or IPv6 branch) -->
+  <rect x="410" y="371" width="380" height="68" rx="7" fill="#166534"/>
+  <text x="600" y="391" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">L3 — IP layer mutation</text>
+  <!-- IPv4 sub -->
+  <rect x="416" y="399" width="180" height="34" rx="5" fill="#14532d"/>
+  <text x="506" y="412" text-anchor="middle" font-size="10" font-weight="600" fill="#bbf7d0">IPv4: mutateIPv4()</text>
+  <text x="506" y="427" text-anchor="middle" font-size="9" fill="#86efac">SrcIP · DstIP · TTL · DSCP</text>
+  <!-- IPv6 sub -->
+  <rect x="604" y="399" width="180" height="34" rx="5" fill="#14532d"/>
+  <text x="694" y="412" text-anchor="middle" font-size="10" font-weight="600" fill="#bbf7d0">IPv6: mutateIPv6()</text>
+  <text x="694" y="427" text-anchor="middle" font-size="9" fill="#86efac">SrcIP · DstIP · HopLimit · DSCP</text>
+
+  <!-- Right annotation for IP -->
+  <rect x="830" y="371" width="220" height="68" rx="6" fill="#f0fdf4" stroke="#86efac" stroke-width="1"/>
+  <text x="940" y="390" text-anchor="middle" font-size="10" font-weight="600" fill="#166534">IP Pool Expansion</text>
+  <text x="940" y="406" text-anchor="middle" font-size="10" fill="#374151">src/dst from pre-expanded CIDR</text>
+  <text x="940" y="421" text-anchor="middle" font-size="10" fill="#374151">pool up to --ip-pool-limit addrs</text>
+  <text x="940" y="436" text-anchor="middle" font-size="10" fill="#374151">Plan cached per session.Key</text>
+
+  <line x1="600" y1="439" x2="600" y2="452" stroke="#374151" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- 7. L4: TCP/UDP mutation -->
+  <rect x="410" y="454" width="380" height="68" rx="7" fill="#b45309"/>
+  <text x="600" y="474" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">L4 — Transport layer mutation</text>
+  <rect x="416" y="482" width="180" height="34" rx="5" fill="#92400e"/>
+  <text x="506" y="495" text-anchor="middle" font-size="10" font-weight="600" fill="#fed7aa">TCP: mutateTCP()</text>
+  <text x="506" y="510" text-anchor="middle" font-size="9" fill="#fde68a">SrcPort · DstPort · Flags · Window</text>
+  <rect x="604" y="482" width="180" height="34" rx="5" fill="#92400e"/>
+  <text x="694" y="495" text-anchor="middle" font-size="10" font-weight="600" fill="#fed7aa">UDP: mutateUDP()</text>
+  <text x="694" y="510" text-anchor="middle" font-size="9" fill="#fde68a">SrcPort · DstPort</text>
+
+  <!-- Right annotation for TCP/UDP -->
+  <rect x="830" y="454" width="220" height="68" rx="6" fill="#fef3c7" stroke="#fcd34d" stroke-width="1"/>
+  <text x="940" y="473" text-anchor="middle" font-size="10" font-weight="600" fill="#b45309">Checksum prep</text>
+  <text x="940" y="489" text-anchor="middle" font-size="10" fill="#374151">SetNetworkLayerForChecksum()</text>
+  <text x="940" y="505" text-anchor="middle" font-size="10" fill="#374151">called on TCP &amp; UDP layers</text>
+  <text x="940" y="519" text-anchor="middle" font-size="10" fill="#374151">before final serialisation</text>
+
+  <line x1="600" y1="522" x2="600" y2="535" stroke="#374151" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- 8. Serialize -->
+  <rect x="410" y="537" width="380" height="55" rx="7" fill="#1d4ed8"/>
+  <text x="600" y="558" text-anchor="middle" font-size="12" font-weight="600" fill="#fff">SerializeLayers(buf, opts, layers…)</text>
+  <text x="600" y="576" text-anchor="middle" font-size="10" fill="#bfdbfe">ComputeChecksums = true · FixLengths = true</text>
+
+  <!-- Right annotation for serialize -->
+  <rect x="830" y="537" width="220" height="55" rx="6" fill="#eff6ff" stroke="#bfdbfe" stroke-width="1"/>
+  <text x="940" y="556" text-anchor="middle" font-size="10" font-weight="600" fill="#1d4ed8">Allocation-free hot path</text>
+  <text x="940" y="572" text-anchor="middle" font-size="10" fill="#374151">SerializeBuffer reused</text>
+  <text x="940" y="588" text-anchor="middle" font-size="10" fill="#374151">across packets (0 allocs/op)</text>
+
+  <line x1="600" y1="592" x2="600" y2="605" stroke="#374151" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- 9. Output -->
+  <rect x="410" y="607" width="380" height="52" rx="7" fill="#166534"/>
+  <text x="600" y="629" text-anchor="middle" font-size="13" font-weight="600" fill="#fff">Output: mutated []byte</text>
+  <text x="600" y="648" text-anchor="middle" font-size="10" fill="#bbf7d0">Rewritten packet ready for sender.Interface.Send()</text>
+
+  <!-- ===== LEFT SIDE: Guard explanation ===== -->
+  <rect x="100" y="113" width="290" height="46" rx="6" fill="#fee2e2" stroke="#b91c1c" stroke-width="1"/>
+  <text x="245" y="133" text-anchor="middle" font-size="10" font-weight="700" fill="#b91c1c">Guard (early return)</text>
+  <text x="245" y="150" text-anchor="middle" font-size="10" fill="#374151">Condition fails → skip mutation</text>
+  <line x1="390" y1="138" x2="408" y2="138" stroke="#b91c1c" stroke-width="1" stroke-dasharray="3,2"/>
+
+  <rect x="100" y="241" width="290" height="46" rx="6" fill="#fee2e2" stroke="#b91c1c" stroke-width="1"/>
+  <text x="245" y="261" text-anchor="middle" font-size="10" font-weight="700" fill="#b91c1c">Guard (early return)</text>
+  <text x="245" y="278" text-anchor="middle" font-size="10" fill="#374151">Non-IP traffic passes unchanged</text>
+  <line x1="390" y1="266" x2="408" y2="266" stroke="#b91c1c" stroke-width="1" stroke-dasharray="3,2"/>
+</svg>
