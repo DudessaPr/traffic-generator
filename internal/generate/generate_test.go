@@ -93,6 +93,9 @@ func TestParseTemplate_Valid(t *testing.T) {
 		{"tcp6:src=2001:db8::1:dst=2001:db8::2:dport=443:flags=SYN", "tcp6"},
 		{"udp6:src=2001:db8::/32:dst=2001:db8::1:dport=53", "udp6"},
 		{"udp:src=10.0.0.1:dst=10.0.0.2:dport=80:size=512", "udp"},
+		// range syntax for ttl and dscp
+		{"tcp:src=10.0.0.1:dst=10.0.0.2:ttl=32-64", "tcp"},
+		{"udp:src=10.0.0.1:dst=10.0.0.2:dscp=0-46", "udp"},
 	}
 	for _, c := range cases {
 		t.Run(c.tmpl, func(t *testing.T) {
@@ -125,6 +128,9 @@ func TestParseTemplate_Invalid(t *testing.T) {
 		{"tcp:src=10.0.0.1:dst=10.0.0.2:unknown=1", "unknown field"},
 		{"tcp:src=10.0.0.1:dst=10.0.0.2:flags=XMAS", "unknown flag"},
 		{"tcp6:src=10.0.0.1:dst=2001:db8::1:dport=80", "IPv4 src for tcp6"},
+		{"tcp:src=10.0.0.1:dst=10.0.0.2:ttl=64-32", "ttl lo>hi"},
+		{"tcp:src=10.0.0.1:dst=10.0.0.2:ttl=256", "ttl >255"},
+		{"tcp:src=10.0.0.1:dst=10.0.0.2:dscp=0-64", "dscp hi >63"},
 	}
 	for _, c := range cases {
 		t.Run(c.desc, func(t *testing.T) {
@@ -497,6 +503,7 @@ func TestMultiWorkerCount(t *testing.T) {
 		t.Fatal(err)
 	}
 	snd := &discardSender{}
+	// Count is per-worker: 4 workers × 100 packets each = 400 total.
 	g, err := New(Config{Count: 100, Workers: 4}, tmpl, snd, testSrcMAC, testDstMAC, newTestMC(t))
 	if err != nil {
 		t.Fatal(err)
@@ -504,8 +511,8 @@ func TestMultiWorkerCount(t *testing.T) {
 	if err := g.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if snd.Sent() != 100 {
-		t.Errorf("packets sent: want 100, got %d", snd.Sent())
+	if snd.Sent() != 400 {
+		t.Errorf("packets sent: want 400, got %d", snd.Sent())
 	}
 }
 
@@ -563,5 +570,131 @@ func TestRouteDstIP(t *testing.T) {
 		if got := tmpl.RouteDstIP().String(); got != c.want {
 			t.Errorf("RouteDstIP(%q): want %s, got %s", c.tmpl, c.want, got)
 		}
+	}
+}
+
+// ---- TTL/DSCP range tests ----
+
+func TestTTLRange(t *testing.T) {
+	tmpl, err := ParseTemplate("tcp:src=10.0.0.1:dst=10.0.0.2:ttl=32-64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rng := fixedRNG()
+	seen := make(map[uint8]bool)
+	for i := 0; i < 200; i++ {
+		data, err := tmpl.Build(testSrcMAC, testDstMAC, rng)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, ip4, _, _, _ := decodePacket(data)
+		if ip4 == nil {
+			t.Fatal("no IPv4 layer")
+		}
+		if ip4.TTL < 32 || ip4.TTL > 64 {
+			t.Errorf("TTL %d outside [32,64]", ip4.TTL)
+		}
+		seen[ip4.TTL] = true
+	}
+	if len(seen) < 5 {
+		t.Errorf("TTL range: only %d distinct values in 200 packets", len(seen))
+	}
+}
+
+func TestDSCPRange(t *testing.T) {
+	tmpl, err := ParseTemplate("udp:src=10.0.0.1:dst=10.0.0.2:dscp=0-46")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rng := fixedRNG()
+	seen := make(map[uint8]bool)
+	for i := 0; i < 200; i++ {
+		data, err := tmpl.Build(testSrcMAC, testDstMAC, rng)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, ip4, _, _, _ := decodePacket(data)
+		if ip4 == nil {
+			t.Fatal("no IPv4 layer")
+		}
+		dscp := ip4.TOS >> 2
+		if dscp > 46 {
+			t.Errorf("DSCP %d outside [0,46]", dscp)
+		}
+		seen[dscp] = true
+	}
+	if len(seen) < 5 {
+		t.Errorf("DSCP range: only %d distinct values in 200 packets", len(seen))
+	}
+}
+
+func TestTTLFixed(t *testing.T) {
+	tmpl, err := ParseTemplate("tcp:src=10.0.0.1:dst=10.0.0.2:ttl=128")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := tmpl.Build(testSrcMAC, testDstMAC, fixedRNG())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, ip4, _, _, _ := decodePacket(data)
+	if ip4.TTL != 128 {
+		t.Errorf("fixed TTL: want 128, got %d", ip4.TTL)
+	}
+}
+
+// ---- CPS dispatcher tests ----
+
+func TestGeneratorCPSDispatch(t *testing.T) {
+	if testing.Short() {
+		t.Skip("timing test")
+	}
+	tmpl, err := ParseTemplate("udp:src=10.0.0.1:dst=10.0.0.2:dport=80")
+	if err != nil {
+		t.Fatal(err)
+	}
+	snd := &discardSender{}
+	mc := newTestMC(t)
+	// 20 CPS, 5 packets per flow, 2 workers → expect ~20 flows in 1s
+	g, err := New(Config{Count: 5, CPS: 20, Workers: 2, Loop: true}, tmpl, snd, testSrcMAC, testDstMAC, mc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_ = g.Run(ctx)
+
+	flows := mc.C.FlowsStarted.Load()
+	// Allow generous tolerance: 10–40 flows in ~1s at 20 CPS
+	if flows < 10 || flows > 40 {
+		t.Errorf("CPS dispatch: want 10–40 flows in 1s at 20 CPS, got %d", flows)
+	}
+}
+
+// ---- Flow-metric tests ----
+
+func TestGeneratorFlowMetrics(t *testing.T) {
+	tmpl, err := ParseTemplate("tcp:src=10.0.0.1:dst=10.0.0.2:dport=80")
+	if err != nil {
+		t.Fatal(err)
+	}
+	snd := &discardSender{}
+	mc := newTestMC(t)
+	// 3 workers, 10 packets each → 3 flows started
+	g, err := New(Config{Count: 10, Workers: 3}, tmpl, snd, testSrcMAC, testDstMAC, mc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := mc.C.FlowsStarted.Load(); got != 3 {
+		t.Errorf("FlowsStarted: want 3, got %d", got)
+	}
+	if got := mc.C.ActiveFlows.Load(); got != 0 {
+		t.Errorf("ActiveFlows after completion: want 0, got %d", got)
+	}
+	if got := mc.C.OpenFlows.Load(); got != 0 {
+		t.Errorf("OpenFlows after completion: want 0, got %d", got)
 	}
 }

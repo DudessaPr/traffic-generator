@@ -127,17 +127,33 @@ func (c *Collector) Snapshot() Snapshot {
 
 func (c *Collector) report() {
 	snap := c.Snapshot()
-	_, _ = fmt.Fprintf(c.out,
-		"[metrics] elapsed=%.1fs pkts=%d pps=%.0f bps=%.0f errors=%d active=%d open=%d cps=%.0f empty=%d\n",
-		snap.ElapsedSec,
-		snap.PacketsSent,
-		snap.PPS,
-		snap.BPS,
-		snap.Errors,
-		snap.ActiveFlows,
-		snap.OpenFlows,
-		snap.CPS,
-		snap.EmptyPackets,
-	)
+	if snap.TargetCPS > 0 {
+		_, _ = fmt.Fprintf(c.out,
+			"[metrics] elapsed=%.1fs pkts=%d pps=%.0f bps=%.0f errors=%d active=%d open=%d target_cps=%.0f actual_cps=%.0f empty=%d\n",
+			snap.ElapsedSec,
+			snap.PacketsSent,
+			snap.PPS,
+			snap.BPS,
+			snap.Errors,
+			snap.ActiveFlows,
+			snap.OpenFlows,
+			snap.TargetCPS,
+			snap.CPS,
+			snap.EmptyPackets,
+		)
+	} else {
+		_, _ = fmt.Fprintf(c.out,
+			"[metrics] elapsed=%.1fs pkts=%d pps=%.0f bps=%.0f errors=%d active=%d open=%d cps=%.0f empty=%d\n",
+			snap.ElapsedSec,
+			snap.PacketsSent,
+			snap.PPS,
+			snap.BPS,
+			snap.Errors,
+			snap.ActiveFlows,
+			snap.OpenFlows,
+			snap.CPS,
+			snap.EmptyPackets,
+		)
+	}
 	c.prev = snap
 }

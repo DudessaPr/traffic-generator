@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -11,15 +12,16 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"tgen/internal/config"
 	"tgen/internal/generate"
 	"tgen/internal/metrics"
 	"tgen/internal/netutil"
-	"tgen/internal/sender"
 )
 
 var genFlags struct {
 	template   string
 	iface      string
+	sender     string
 	rate       string
 	count      int64
 	workers    int
@@ -75,11 +77,13 @@ func init() {
 	f.IntVar(&genFlags.preBuild, "pre-build", 0,
 		"pre-build N packets per worker before the send loop (0 = disabled)")
 	f.Float64Var(&genFlags.cps, "cps", 0,
-		"connections per second: new flow cycles to start per second across all workers (0=unlimited)")
+		"target new flows per second via ticker (0=unlimited); requires --count > 0 for ticker mode")
 	f.Float64Var(&genFlags.multiplier, "multiplier", 1.0,
 		"rate multiplier applied to --rate and --cps (e.g. 2.0 doubles the effective rate)")
 	f.IntVar(&genFlags.batchSize, "batch-size", 32,
 		"frames per SendBatch call when --pre-build > 0 (1–256; requires AF_PACKET raw sender)")
+	f.StringVar(&genFlags.sender, "sender", "pcap",
+		"packet injection backend: pcap (default) or raw (Linux AF_PACKET)")
 	_ = generateCmd.MarkFlagRequired("template")
 	rootCmd.AddCommand(generateCmd)
 }
@@ -116,7 +120,10 @@ func runGenerate(_ *cobra.Command, _ []string) error {
 	fmt.Fprintf(os.Stderr, "Interface: %s  src-MAC: %s  gateway-MAC: %s\n",
 		ifaceName, srcMAC, dstMAC)
 
-	snd, err := sender.New(ifaceName)
+	snd, err := buildSender(&config.Config{
+		Interface: ifaceName,
+		Sender:    genFlags.sender,
+	})
 	if err != nil {
 		return err
 	}
@@ -128,14 +135,14 @@ func runGenerate(_ *cobra.Command, _ []string) error {
 	}
 
 	cfg := generate.Config{
-		Rate:       genFlags.rate,
-		Count:      genFlags.count,
-		Loop:       genFlags.loop,
-		Workers:    genFlags.workers,
-		PreBuild:   genFlags.preBuild,
-		CPS:        genFlags.cps,
+		Rate:      genFlags.rate,
+		Count:     genFlags.count,
+		Loop:      genFlags.loop,
+		Workers:   genFlags.workers,
+		PreBuild:  genFlags.preBuild,
+		CPS:       genFlags.cps,
 		Multiplier: genFlags.multiplier,
-		BatchSize:  genFlags.batchSize,
+		BatchSize: genFlags.batchSize,
 	}
 	mc.TargetRate = genFlags.rate
 	mc.TargetCPS = genFlags.cps
@@ -152,8 +159,8 @@ func runGenerate(_ *cobra.Command, _ []string) error {
 	go func() { mc.Run(done) }()
 
 	fmt.Fprintf(os.Stderr,
-		"Generating… (template=%q  rate=%q  count=%d  workers=%d  loop=%v  pre-build=%d  batch-size=%d)\n",
-		genFlags.template, genFlags.rate, genFlags.count, genFlags.workers, genFlags.loop, genFlags.preBuild, genFlags.batchSize)
+		"Generating… (template=%q  rate=%q  count=%d  cps=%.0f  workers=%d  loop=%v  pre-build=%d  batch-size=%d)\n",
+		genFlags.template, genFlags.rate, genFlags.count, genFlags.cps, genFlags.workers, genFlags.loop, genFlags.preBuild, genFlags.batchSize)
 
 	runErr := g.Run(ctx)
 	close(done)
@@ -164,8 +171,8 @@ func runGenerate(_ *cobra.Command, _ []string) error {
 		snap.PacketsSent, snap.BytesSent, snap.Errors, snap.ElapsedSec,
 	)
 
-	if runErr != nil && runErr != context.Canceled {
-		return runErr
+	if errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded) {
+		return nil
 	}
-	return nil
+	return runErr
 }

@@ -25,8 +25,8 @@ type Template struct {
 	sportMin, sportMax uint16
 	dportMin, dportMax uint16
 
-	ttl  uint8
-	dscp uint8
+	ttlMin, ttlMax   uint8 // range [ttlMin, ttlMax]; equal = fixed value
+	dscpMin, dscpMax uint8 // range [dscpMin, dscpMax]; equal = fixed value
 
 	payloadSize int // extra payload bytes appended to the L4 body
 
@@ -53,7 +53,8 @@ func ParseTemplate(s string) (*Template, error) {
 	parts := splitTemplate(s)
 	t := &Template{
 		proto:    strings.ToLower(parts[0]),
-		ttl:      64,
+		ttlMin:   64,
+		ttlMax:   64,
 		sportMin: 1024,
 		sportMax: 65535,
 		dportMin: 80,
@@ -95,20 +96,17 @@ func ParseTemplate(s string) (*Template, error) {
 			}
 			t.dportMin, t.dportMax = lo, hi
 		case "ttl":
-			v, err := strconv.ParseUint(val, 10, 8)
+			lo, hi, err := parseUint8Range(val, 255)
 			if err != nil {
 				return nil, fmt.Errorf("ttl: %w", err)
 			}
-			t.ttl = uint8(v)
+			t.ttlMin, t.ttlMax = lo, hi
 		case "dscp":
-			v, err := strconv.ParseUint(val, 10, 8)
+			lo, hi, err := parseUint8Range(val, 63)
 			if err != nil {
 				return nil, fmt.Errorf("dscp: %w", err)
 			}
-			if v > 63 {
-				return nil, fmt.Errorf("dscp %d exceeds maximum 63", v)
-			}
-			t.dscp = uint8(v)
+			t.dscpMin, t.dscpMax = lo, hi
 		case "flags":
 			if t.proto != "tcp" && t.proto != "tcp6" {
 				return nil, fmt.Errorf("flags: only valid for tcp and tcp6")
@@ -155,13 +153,16 @@ func (t *Template) RouteDstIP() net.IP {
 }
 
 // Build serialises one Ethernet frame from the template.
-// CIDRs and port ranges are resolved uniformly at random using rng.
-// Build is safe for concurrent use when each caller supplies its own rng.
+// CIDRs, port ranges, TTL ranges, and DSCP ranges are resolved uniformly at
+// random using rng. Build is safe for concurrent use when each caller supplies
+// its own rng.
 func (t *Template) Build(srcMAC, dstMAC net.HardwareAddr, rng *rand.Rand) ([]byte, error) {
 	srcIP := t.pickIP(t.srcNet, t.srcIP, rng)
 	dstIP := t.pickIP(t.dstNet, t.dstIP, rng)
 	sport := t.pickPort(t.sportMin, t.sportMax, rng)
 	dport := t.pickPort(t.dportMin, t.dportMax, rng)
+	ttl := t.pickUint8(t.ttlMin, t.ttlMax, rng)
+	dscp := t.pickUint8(t.dscpMin, t.dscpMax, rng)
 
 	eth := &layers.Ethernet{SrcMAC: srcMAC, DstMAC: dstMAC}
 	payload := gopacket.Payload(make([]byte, t.payloadSize))
@@ -174,8 +175,8 @@ func (t *Template) Build(srcMAC, dstMAC net.HardwareAddr, rng *rand.Rand) ([]byt
 		eth.EthernetType = layers.EthernetTypeIPv6
 		ip6 := &layers.IPv6{
 			Version:      6,
-			HopLimit:     t.ttl,
-			TrafficClass: t.dscp << 2,
+			HopLimit:     ttl,
+			TrafficClass: dscp << 2,
 			SrcIP:        srcIP,
 			DstIP:        dstIP,
 		}
@@ -215,8 +216,8 @@ func (t *Template) Build(srcMAC, dstMAC net.HardwareAddr, rng *rand.Rand) ([]byt
 		ip4 := &layers.IPv4{
 			Version: 4,
 			IHL:     5,
-			TTL:     t.ttl,
-			TOS:     t.dscp << 2,
+			TTL:     ttl,
+			TOS:     dscp << 2,
 			SrcIP:   srcIP,
 			DstIP:   dstIP,
 		}
@@ -284,6 +285,13 @@ func (t *Template) pickPort(min, max uint16, rng *rand.Rand) uint16 {
 	return min + uint16(rng.Intn(int(max-min)+1))
 }
 
+func (t *Template) pickUint8(lo, hi uint8, rng *rand.Rand) uint8 {
+	if lo == hi {
+		return lo
+	}
+	return lo + uint8(rng.Intn(int(hi-lo)+1))
+}
+
 // randIPv4FromNet returns a random IPv4 address within the given network.
 // Every bit covered by the host portion of the mask is independently randomised.
 func randIPv4FromNet(n *net.IPNet, rng *rand.Rand) net.IP {
@@ -340,6 +348,26 @@ func parseCIDROrIP(s string, isIPv6 bool, netOut **net.IPNet, ipOut *net.IP) err
 		*ipOut = ip4
 	}
 	return nil
+}
+
+// parseUint8Range parses "N" or "N-M" where both values must be ≤ maxVal.
+func parseUint8Range(s string, maxVal uint8) (lo, hi uint8, err error) {
+	if idx := strings.IndexByte(s, '-'); idx >= 0 {
+		a, e1 := strconv.ParseUint(s[:idx], 10, 16)
+		b, e2 := strconv.ParseUint(s[idx+1:], 10, 16)
+		if e1 != nil || e2 != nil || a > uint64(maxVal) || b > uint64(maxVal) {
+			return 0, 0, fmt.Errorf("invalid range %q (max %d)", s, maxVal)
+		}
+		if a > b {
+			return 0, 0, fmt.Errorf("range %q: low > high", s)
+		}
+		return uint8(a), uint8(b), nil
+	}
+	v, e := strconv.ParseUint(s, 10, 16)
+	if e != nil || v > uint64(maxVal) {
+		return 0, 0, fmt.Errorf("invalid value %q (max %d)", s, maxVal)
+	}
+	return uint8(v), uint8(v), nil
 }
 
 func parsePortRange(s string) (lo, hi uint16, err error) {

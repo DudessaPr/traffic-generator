@@ -37,6 +37,9 @@ internal/sender/
 internal/ratelimit/
   rate.go       Limiter (token bucket via x/time/rate); New; ParseRate; rampUp goroutine
                 CPSLimiter: token bucket for new connections/sessions; NewCPS; Wait
+                CPSDispatcher: ticker-based target CPS (not upper bound); NewCPSDispatcher; Take
+                  — ticker fires at 1s/cps intervals; Take blocks until a tick or ctx cancel
+                  — used by generate pipeline when cps>0 && count>0
                 ParseCPS: parses "1000", "1kcps", "1Mcps"; ApplyMultiplier: scales rate strings
                 Shared by both the replay and generate pipelines.
 
@@ -47,8 +50,14 @@ internal/replay/
 internal/generate/
   template.go   Template: ParseTemplate; Build(srcMAC, dstMAC, rng) — Ethernet/IPv4+IPv6/TCP/UDP/ICMP
                 splitTemplate custom tokeniser handles IPv6 ':' in field values
-  generator.go  Generator: Config (Rate/Count/Loop/Workers/PreBuild/BatchSize); New; Run(ctx)
-                Run spawns N worker goroutines; each has its own *rand.Rand + optional pre-built buffer
+                ttl=lo-hi and dscp=lo-hi syntax: random value per packet via pickUint8
+  generator.go  Generator: Config (Rate/Count/Loop/Workers/PreBuild/CPS/CPSWorkers/BatchSize); New; Run(ctx)
+                Two dispatch paths in Run:
+                  CPS path (cps>0 && count>0): CPSDispatcher ticker → CPSWorkers goroutines drain it;
+                    each goroutine runs one flow cycle (count packets) per tick; FlowsStarted/Active/Open
+                    tracked per cycle (not per goroutine).
+                  Workers path (default): N worker goroutines, optional CPSLimiter upper-bound;
+                    FlowsStarted/ActiveFlows/OpenFlows tracked per cycle with idempotent endCycle().
                 Batch path active when PreBuild>0 and sender implements Batcher
 
 internal/netutil/
@@ -219,19 +228,30 @@ duplication.
 (`rateLimiter` type alias, `newRateLimiter`, `parseRate`) that preserve the
 existing test API without duplicating any logic.
 
-### CPS limiter (`ratelimit.CPSLimiter`)
-`CPSLimiter` is a second token-bucket limiter that throttles how many new
-*sessions* (connections) start per second, independently of the per-packet
-`Limiter`. One token = one new session.
+### CPS limiter vs dispatcher
 
-- Burst = 10% of CPS (capped at 1000), drained immediately so the limit is
+Two CPS implementations exist for different use cases:
+
+**`ratelimit.CPSLimiter`** (token bucket — upper bound):
+- `NewCPS(ctx, cps, rampStr)` → `*CPSLimiter`; nil for unlimited.
+- Burst = 10% of CPS (capped at 1000), drained immediately so limiting is
   enforced from the first session.
-- Applied in `runSequential` (before each `replaySession` call) and
-  `runParallel` (after acquiring the semaphore slot, before the goroutine
-  launches). Not applied in `runBurst` or `runPcap`.
-- In the generator, the limiter is shared across all worker goroutines; each
-  worker waits once per flow cycle (initial start + each loop restart).
-- A nil `*CPSLimiter` is unlimited (zero value is safe to call `Wait` on).
+- Used by the **replay** pipeline: `runSequential` and `runParallel` call
+  `cpsLimiter.Wait(ctx)` before each session. Not applied in `runBurst` or
+  `runPcap`.
+- Also used as the fallback in the **generator** workers-mode when
+  `--count 0` (no defined flow duration).
+
+**`ratelimit.CPSDispatcher`** (ticker — throughput target):
+- `NewCPSDispatcher(ctx, cps)` → `*CPSDispatcher`; nil for unlimited.
+- A goroutine ticks at 1s/cps interval, sending a signal into a buffered
+  channel (capacity 1024). `Take(ctx)` blocks until a signal arrives.
+- Used by the **generator** CPS path when `--cps > 0 && --count > 0`.
+  `--cps-workers` goroutines call `Take` concurrently; whichever goroutine
+  gets the signal starts the next flow cycle immediately.
+- If the channel fills (workers can't keep up), excess ticks are dropped
+  (non-blocking send). This bounds memory and prevents unbounded queuing.
+- A nil `*CPSDispatcher.Take` returns nil immediately (unlimited).
 
 ### --multiplier
 `ratelimit.ApplyMultiplier(rateStr, m)` parses the rate string, scales the
@@ -257,18 +277,29 @@ packet and uses `gopacket.SerializeLayers` to produce a complete Ethernet frame:
   address per build call by ORing the network base with a random host portion,
   bit-by-bit through the mask.  No pre-expansion or boundary exclusion — the
   generator is stateless.
-- **Port ranges**: `pickPort(min, max, rng)` draws uniformly from `[min, max]`.
+- **Port / TTL / DSCP ranges**: `field=lo-hi` syntax accepted for `sport`,
+  `dport`, `ttl`, `dscp`.  `pickPort(min, max, rng)` and `pickUint8(lo, hi,
+  rng)` draw uniformly per packet.  `parseUint8Range` validates bounds (≤ 255
+  for TTL, ≤ 63 for DSCP) and enforces lo ≤ hi.
 - **`*rand.Rand` injection**: `Build` accepts a seeded `*rand.Rand` so tests use
   a fixed seed for deterministic packet fields, and multi-worker production runs
   give each goroutine its own isolated RNG.
-- **Workers**: `Generator.Run` spawns N goroutines (default 1); total count is
-  distributed evenly with the remainder spread to the first N workers.  Each
-  goroutine seeds its own `*rand.Rand` with `now.UnixNano ^ (i+1)<<32` to
-  guarantee distinct initial states even when spawned in the same nanosecond.
-- **Pre-build buffer**: when `PreBuild > 0`, `Run` builds all packets in the
-  main goroutine before launching workers, so a build failure aborts cleanly.
-  Workers cycle through the buffer with `buf[idx%len(buf)]`, removing `Build()`
-  and all rand calls from the hot path.
+- **CPS dispatch model** (when `--cps > 0 && --count > 0`): `Generator.Run`
+  creates a `CPSDispatcher` (ticker at 1s/cps) and spawns `CPSWorkers`
+  goroutines.  Each goroutine calls `dispatcher.Take(ctx)` to wait for the next
+  tick, then executes one flow cycle (sends `Count` packets), incrementing
+  `FlowsStarted` / `ActiveFlows` / `OpenFlows` at the start and decrementing at
+  the end.  If `--loop` is set the goroutine waits for the next tick before
+  starting another cycle.  A shared pre-built read-only buffer is used when
+  `--pre-build > 0`.
+- **Workers model** (default, no CPS or `--count 0`): `Generator.Run` spawns
+  `Workers` goroutines; count is distributed evenly with remainder to the first
+  goroutines.  Flow metrics use an idempotent `endCycle()` (guarded by a
+  `flowRunning` flag) to avoid double-decrement on context cancellation at a
+  cycle boundary.
+- **Pre-build buffer**: when `PreBuild > 0`, `Run` builds all packets before
+  launching workers, so a build failure aborts cleanly.  Workers cycle through
+  the buffer with `buf[idx%len(buf)]`, removing `Build()` from the hot path.
 - **MAC resolution**: `cmd/tgen/generate.go` calls `netutil.Resolve(dstIP)` once
   at startup to obtain the outbound interface and gateway MAC.  The same ARP
   resolution path is reused from the `--target-ip` logic in `tgen run`.

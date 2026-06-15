@@ -131,3 +131,48 @@ func TestCPSLimiterContextCancel(t *testing.T) {
 		t.Error("Wait after context cancel: want error, got nil")
 	}
 }
+
+// ---- CPSDispatcher tests ----
+
+func TestCPSDispatcherNil(t *testing.T) {
+	var d *CPSDispatcher
+	if err := d.Take(context.Background()); err != nil {
+		t.Errorf("nil CPSDispatcher.Take: want nil, got %v", err)
+	}
+}
+
+func TestCPSDispatcherZero(t *testing.T) {
+	d := NewCPSDispatcher(context.Background(), 0)
+	if d != nil {
+		t.Error("NewCPSDispatcher(0): want nil (unlimited), got non-nil")
+	}
+}
+
+func TestCPSDispatcherFires(t *testing.T) {
+	if testing.Short() {
+		t.Skip("timing test")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	// 100 CPS → one tick every 10ms → ~50 ticks in 500ms
+	d := NewCPSDispatcher(ctx, 100)
+	var count int
+	for {
+		if err := d.Take(ctx); err != nil {
+			break
+		}
+		count++
+	}
+	if count < 20 || count > 80 {
+		t.Errorf("CPSDispatcher at 100 CPS for 500ms: want 20–80 ticks, got %d", count)
+	}
+}
+
+func TestCPSDispatcherContextCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	d := NewCPSDispatcher(ctx, 1) // very slow so Take blocks
+	cancel()
+	if err := d.Take(ctx); err == nil {
+		t.Error("Take after cancel: want error, got nil")
+	}
+}

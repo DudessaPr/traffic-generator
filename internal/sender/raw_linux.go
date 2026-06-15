@@ -11,12 +11,21 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// mmsghdr mirrors the kernel's struct mmsghdr layout, which is not yet exported
+// by golang.org/x/sys/unix. Padding after Len is added automatically by the
+// compiler to match the kernel's alignment on all supported Linux architectures.
+type mmsghdr struct {
+	Hdr unix.Msghdr
+	Len uint32
+}
+
 // RawSender injects raw Ethernet frames via AF_PACKET SOCK_RAW, bypassing the
 // libpcap overhead. Requires CAP_NET_RAW or root privileges.
 type RawSender struct {
 	fd    int
 	iface string
 	ll    syscall.SockaddrLinklayer
+	rll   unix.RawSockaddrLinklayer // pre-built address for sendmmsg headers
 }
 
 // NewRaw opens an AF_PACKET socket bound to iface.
@@ -39,7 +48,12 @@ func NewRaw(iface string) (*RawSender, error) {
 		_ = syscall.Close(fd)
 		return nil, fmt.Errorf("bind AF_PACKET on %q: %w", iface, err)
 	}
-	return &RawSender{fd: fd, iface: iface, ll: ll}, nil
+	rll := unix.RawSockaddrLinklayer{
+		Family:   unix.AF_PACKET,
+		Protocol: proto,
+		Ifindex:  int32(ifi.Index),
+	}
+	return &RawSender{fd: fd, iface: iface, ll: ll, rll: rll}, nil
 }
 
 // Send writes one raw Ethernet frame via the kernel socket.
@@ -56,47 +70,52 @@ func (s *RawSender) Send(data []byte) error {
 	return nil
 }
 
-// SendBatch injects multiple raw Ethernet frames. It attempts sendmmsg (one
-// syscall for all frames); if the kernel does not support it (ENOSYS) it falls
-// back to a sequential loop of Sendto.
+// SendBatch injects multiple raw Ethernet frames via a single sendmmsg(2) syscall,
+// reducing per-packet kernel-crossing overhead compared to sequential Send calls.
+// Falls back to sequential Sendto when the kernel returns ENOSYS.
 func (s *RawSender) SendBatch(frames [][]byte) (int, error) {
 	if len(frames) == 0 {
 		return 0, nil
 	}
-	n, err := s.trySendmmsg(frames)
-	if err == syscall.ENOSYS {
-		return s.sendBatchSeq(frames)
-	}
-	return n, err
-}
 
-// trySendmmsg builds one Mmsghdr per frame and issues a single sendmmsg syscall.
-func (s *RawSender) trySendmmsg(frames [][]byte) (int, error) {
-	// Heap-allocate rsa so its address is stable for the duration of the syscall.
-	// A stack variable's address would be valid too (the runtime pins goroutine
-	// stacks during blocking syscalls), but an explicit heap allocation makes the
-	// intent unambiguous to the compiler and escape analysis.
-	rsa := &syscall.RawSockaddrLinklayer{
-		Family:   syscall.AF_PACKET,
-		Protocol: s.ll.Protocol,
-		Ifindex:  int32(s.ll.Ifindex),
-	}
-	rsaLen := uint32(unsafe.Sizeof(*rsa))
-
-	hdrs := make([]unix.Mmsghdr, len(frames))
-	iovs := make([]unix.Iovec, len(frames))
-	for i, f := range frames {
+	// Pre-allocate with exact capacity so append never reallocates;
+	// &iovecs[i] pointers passed into hdrs must remain stable.
+	iovecs := make([]unix.Iovec, 0, len(frames))
+	for _, f := range frames {
 		if len(f) == 0 {
 			continue
 		}
-		iovs[i].Base = &f[0]
-		iovs[i].SetLen(len(f))
-		hdrs[i].Hdr.Iov = &iovs[i]
-		hdrs[i].Hdr.SetIovlen(1)
-		hdrs[i].Hdr.Name = (*byte)(unsafe.Pointer(rsa))
-		hdrs[i].Hdr.Namelen = rsaLen
+		var iov unix.Iovec
+		iov.Base = &f[0]
+		iov.SetLen(len(f))
+		iovecs = append(iovecs, iov)
 	}
-	return unix.Sendmmsg(s.fd, hdrs, 0)
+	if len(iovecs) == 0 {
+		return 0, nil
+	}
+
+	hdrs := make([]mmsghdr, len(iovecs))
+	for i := range iovecs {
+		hdrs[i].Hdr.Name = (*byte)(unsafe.Pointer(&s.rll))
+		hdrs[i].Hdr.Namelen = unix.SizeofSockaddrLinklayer
+		hdrs[i].Hdr.Iov = &iovecs[i]
+		hdrs[i].Hdr.SetIovlen(1)
+	}
+
+	n, _, errno := unix.Syscall6(
+		unix.SYS_SENDMMSG,
+		uintptr(s.fd),
+		uintptr(unsafe.Pointer(&hdrs[0])),
+		uintptr(len(hdrs)),
+		0, 0, 0,
+	)
+	if errno == syscall.ENOSYS {
+		return s.sendBatchSeq(frames)
+	}
+	if errno != 0 {
+		return int(n), fmt.Errorf("sendmmsg %s: %w", s.iface, errno)
+	}
+	return int(n), nil
 }
 
 // sendBatchSeq is the fallback used when sendmmsg is unavailable.

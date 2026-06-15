@@ -189,6 +189,60 @@ func (c *CPSLimiter) Wait(ctx context.Context) error {
 	return c.lim.Wait(ctx)
 }
 
+// CPSDispatcher fires flow-start signals at a fixed ticker interval, making
+// --cps a throughput target rather than a ceiling. Unlike CPSLimiter (token
+// bucket), the ticker cannot be "saved up": excess capacity is bounded by the
+// channel buffer. A nil *CPSDispatcher is unlimited.
+type CPSDispatcher struct {
+	ch  <-chan struct{}
+	cps float64
+}
+
+// cpsDispatchBuf is the maximum number of queued flow-start signals.
+const cpsDispatchBuf = 1024
+
+// NewCPSDispatcher starts a ticker goroutine that emits one flow-start signal
+// per 1s/cps interval. Returns nil when cps <= 0 (unlimited). The goroutine
+// stops when ctx is cancelled.
+func NewCPSDispatcher(ctx context.Context, cps float64) *CPSDispatcher {
+	if cps <= 0 {
+		return nil
+	}
+	ch := make(chan struct{}, cpsDispatchBuf)
+	interval := time.Duration(float64(time.Second) / cps)
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				select {
+				case ch <- struct{}{}:
+				default: // buffer full; this tick is skipped
+				}
+			}
+		}
+	}()
+	return &CPSDispatcher{ch: ch, cps: cps}
+}
+
+// Take blocks until a flow-start signal arrives or ctx is cancelled.
+// Returns nil on signal, ctx.Err() on cancellation.
+// Safe to call concurrently from multiple goroutines.
+func (d *CPSDispatcher) Take(ctx context.Context) error {
+	if d == nil {
+		return nil
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-d.ch:
+		return nil
+	}
+}
+
 // Limiter wraps a token-bucket rate limiter.
 // A nil *Limiter is valid and means unlimited.
 type Limiter struct {

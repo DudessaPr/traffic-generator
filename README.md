@@ -221,8 +221,8 @@ tgen generate -t <template> [flags]
 | `dst=` | IP or CIDR | Destination address / range (required) |
 | `sport=` | `port` or `lo-hi` | Source port or range (default `1024-65535`) |
 | `dport=` | `port` or `lo-hi` | Destination port or range (default `80`) |
-| `ttl=` | `0–255` | IP TTL / IPv6 hop limit (default `64`) |
-| `dscp=` | `0–63` | DSCP / DiffServ code point (default `0`) |
+| `ttl=` | `0–255` or `lo-hi` | IP TTL / IPv6 hop limit or range (default `64`); e.g. `ttl=32-64` randomises per packet |
+| `dscp=` | `0–63` or `lo-hi` | DSCP / DiffServ code point or range (default `0`); e.g. `dscp=0-46` randomises per packet |
 | `flags=` | `SYN,ACK,FIN,RST,PSH,URG` | TCP flags to set (`tcp` and `tcp6` only) |
 | `size=` | `0–65535` | Extra zero-padded payload bytes appended after L4 header (default `0`) |
 
@@ -240,7 +240,7 @@ contain `:`) are handled correctly by the parser.
 | `--workers` | `1` | Concurrent sender goroutines (each with its own RNG) |
 | `--loop` | `false` | Restart after `--count` packets are sent; loop indefinitely |
 | `--pre-build` | `0` | Pre-build N packets per worker before the send loop; cycles through the buffer at runtime (removes `Build()` from hot path) |
-| `--cps` | `0` | Connections per second — new flow cycles (count-batches) to start per second across all workers (`0`=unlimited) |
+| `--cps` | `0` | Target new flows per second via ticker (0=unlimited). When `--count > 0`, a ticker fires at 1s/cps intervals; `--workers` goroutines drain the queue. Falls back to token-bucket upper-bound when `--count 0`. |
 | `--multiplier` | `1.0` | Multiplicative rate scaler applied to both `--rate` and `--cps` (e.g. `2.0` doubles both) |
 | `--batch-size` | `32` | Frames per `SendBatch` call when `--pre-build > 0` (1–256). Has effect only when the sender implements `Batcher` (AF_PACKET raw sender on Linux) |
 
@@ -599,9 +599,15 @@ tgen prints a one-line report at each `report_interval`:
 | `bps` | Bytes per second (current interval) |
 | `errors` | Mutation or injection errors |
 | `active` | Flows currently in flight (started but not yet finished) |
-| `open` | Flows with no FIN or RST sent yet |
-| `cps` | New flows started per second (measured, current interval) |
+| `open` | Flows with no FIN or RST sent yet (TCP stateless generator: always equal to `active`) |
+| `cps` | New flows started per second (measured, current interval). When `--cps` is configured, the label changes to `actual_cps` and `target_cps=<N>` is also printed. |
 | `empty` | Packets with zero-length data skipped without sending |
+
+When `--cps` is configured the line uses `target_cps` / `actual_cps` labels:
+
+```
+[metrics] elapsed=1.0s pkts=50000 pps=50000 bps=... errors=0 active=4 open=4 target_cps=100 actual_cps=98 empty=0
+```
 
 The `Snapshot` returned by `mc.Snapshot()` also exposes `TargetRate`, `TargetCPS`,
 and `Multiplier` — the configured (pre-multiplier) values — for use in custom

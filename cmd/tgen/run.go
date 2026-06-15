@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -244,6 +245,9 @@ func runReplay(cmd *cobra.Command, args []string) error {
 		"\nDone. packets=%d bytes=%d errors=%d sessions=%d elapsed=%.1fs\n",
 		snap.PacketsSent, snap.BytesSent, snap.Errors, snap.SessionsDone, snap.ElapsedSec,
 	)
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return nil
+	}
 	return err
 }
 
@@ -259,13 +263,23 @@ func buildSender(cfg *config.Config) (sender.Interface, error) {
 		return nil, fmt.Errorf("no interface specified")
 	}
 
-	// TODO: add functionality for RawSender (linux sockets) to be able to send to many interfaces instead of just one.
 	switch strings.ToLower(cfg.Sender) {
 	case "raw":
-		if len(ifaces) != 1 {
-			return nil, fmt.Errorf("--sender raw requires exactly one interface")
+		if len(ifaces) == 1 {
+			return sender.NewRaw(ifaces[0])
 		}
-		return sender.NewRaw(ifaces[0])
+		senders := make([]sender.Interface, len(ifaces))
+		for i, iface := range ifaces {
+			s, err := sender.NewRaw(iface)
+			if err != nil {
+				for _, prev := range senders[:i] {
+					prev.Close()
+				}
+				return nil, err
+			}
+			senders[i] = s
+		}
+		return sender.NewPoolFrom(senders), nil
 	default: // "pcap" or ""
 		if len(ifaces) > 1 {
 			return sender.NewPool(ifaces)
