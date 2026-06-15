@@ -20,7 +20,7 @@ import (
 
 var genFlags struct {
 	template   string
-	iface      string
+	ifaces     []string
 	sender     string
 	rate       string
 	count      int64
@@ -64,8 +64,8 @@ func init() {
 	f := generateCmd.Flags()
 	f.StringVarP(&genFlags.template, "template", "t", "",
 		"packet template string (required)")
-	f.StringVarP(&genFlags.iface, "interface", "i", "",
-		"outbound interface (auto-detected from dst IP when omitted)")
+	f.StringSliceVarP(&genFlags.ifaces, "interface", "i", nil,
+		"outbound interface(s); comma-separated or repeatable for multi-interface pool (auto-detected from dst IP when omitted)")
 	f.StringVar(&genFlags.rate, "rate", "",
 		"rate limit: 100kpps, 1mpps, 1gbps, 100mbps, … (default: unlimited)")
 	f.Int64Var(&genFlags.count, "count", 0,
@@ -106,23 +106,36 @@ func runGenerate(_ *cobra.Command, _ []string) error {
 			dstIP)
 	}
 
-	ifaceName := info.Interface.Name
-	if genFlags.iface != "" {
-		ifaceName = genFlags.iface
+	// Primary interface: first from --interface list, or auto-detected.
+	primaryIface := info.Interface.Name
+	if len(genFlags.ifaces) > 0 {
+		primaryIface = genFlags.ifaces[0]
 	}
-	iface, err := net.InterfaceByName(ifaceName)
+	iface, err := net.InterfaceByName(primaryIface)
 	if err != nil {
-		return fmt.Errorf("interface %q: %w", ifaceName, err)
+		return fmt.Errorf("interface %q: %w", primaryIface, err)
 	}
 	srcMAC := iface.HardwareAddr
 	dstMAC := info.GatewayMAC
 
-	fmt.Fprintf(os.Stderr, "Interface: %s  src-MAC: %s  gateway-MAC: %s\n",
-		ifaceName, srcMAC, dstMAC)
+	// Collect all interfaces; fall back to the single resolved one.
+	allIfaces := genFlags.ifaces
+	if len(allIfaces) == 0 {
+		allIfaces = []string{primaryIface}
+	}
+
+	if len(allIfaces) == 1 {
+		fmt.Fprintf(os.Stderr, "Interface: %s  src-MAC: %s  gateway-MAC: %s\n",
+			allIfaces[0], srcMAC, dstMAC)
+	} else {
+		fmt.Fprintf(os.Stderr, "Interfaces: %v  src-MAC: %s  gateway-MAC: %s\n",
+			allIfaces, srcMAC, dstMAC)
+	}
 
 	snd, err := buildSender(&config.Config{
-		Interface: ifaceName,
-		Sender:    genFlags.sender,
+		Interface:  primaryIface,
+		Interfaces: allIfaces,
+		Sender:     genFlags.sender,
 	})
 	if err != nil {
 		return err
