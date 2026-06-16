@@ -2,33 +2,43 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
-	"github.com/spf13/cobra"
 	"tgen/internal/config"
 	"tgen/internal/metrics"
 	"tgen/internal/mutation"
+	"tgen/internal/netutil"
 	pcapreader "tgen/internal/pcap"
 	"tgen/internal/replay"
 	"tgen/internal/sender"
 	"tgen/internal/session"
+
+	"github.com/spf13/cobra"
 )
 
 var runFlags struct {
-	iface      string
+	ifaces     []string
+	targetIP   string
+	senderType string
 	speed      float64
 	mode       string
 	loop       bool
 	loopCount  int
 	workers    int
-	srcIP      string
-	dstIP      string
-	srcIPPool  []string
-	dstIPPool  []string
+	// IP mutation
+	srcIP       string
+	dstIP       string
+	srcIPPool   []string
+	dstIPPool   []string
+	ipPoolLimit int
+	// port mutation
 	srcPortMin uint16
 	srcPortMax uint16
 	dstPort    uint16
@@ -39,6 +49,15 @@ var runFlags struct {
 	tcpSetFlags   string
 	tcpClearFlags string
 	tcpWindow     uint16
+	// rate control
+	rate       string
+	rateRamp   string
+	cps        float64
+	multiplier float64
+	// replay behaviour
+	preProcess    bool
+	ipPoolPerIter bool
+	batchSize     int
 	// filter flags
 	minDuration string
 	maxDuration string
@@ -56,29 +75,80 @@ var runCmd = &cobra.Command{
 
 func init() {
 	f := runCmd.Flags()
-	f.StringVarP(&runFlags.iface, "interface", "i", "", "network interface to send on (required)")
-	f.Float64VarP(&runFlags.speed, "speed", "s", 1.0, "replay speed multiplier (0=burst, 1=real-time, 2=2×)")
-	f.StringVarP(&runFlags.mode, "mode", "m", "sequential", "sequential|parallel|burst")
+	f.StringSliceVarP(&runFlags.ifaces, "interface", "i", nil,
+		"network interface(s) to send on; comma-separated or repeatable for multi-interface pool (required)")
+	f.StringVar(&runFlags.targetIP, "target-ip", "",
+		"auto-resolve outbound interface and gateway MAC for this destination IP")
+	f.StringVar(&runFlags.senderType, "sender", "",
+		"packet injection backend: pcap (default) or raw (Linux AF_PACKET)")
+
+	f.Float64VarP(&runFlags.speed, "speed", "s", 1.0,
+		"replay speed multiplier (0=burst, 1=real-time, 2=2×)")
+	f.StringVarP(&runFlags.mode, "mode", "m", "sequential",
+		"sequential|parallel|burst|pcap")
 	f.BoolVarP(&runFlags.loop, "loop", "l", false, "replay indefinitely")
 	f.IntVar(&runFlags.loopCount, "loop-count", 0, "number of replay passes (0=once)")
+
 	f.IntVar(&runFlags.workers, "workers", 4, "goroutine count for parallel mode")
+
 	f.StringVar(&runFlags.srcIP, "src-ip", "", "override source IP for all sessions")
 	f.StringVar(&runFlags.dstIP, "dst-ip", "", "override destination IP for all sessions")
-	f.StringSliceVar(&runFlags.srcIPPool, "src-ip-pool", nil, "source IP pool: random IP per session (CIDR or plain IP, repeatable)")
-	f.StringSliceVar(&runFlags.dstIPPool, "dst-ip-pool", nil, "destination IP pool: random IP per session (CIDR or plain IP, repeatable)")
-	f.Uint16Var(&runFlags.srcPortMin, "src-port-min", 0, "randomise source port from this value")
-	f.Uint16Var(&runFlags.srcPortMax, "src-port-max", 0, "randomise source port up to this value")
-	f.Uint16Var(&runFlags.dstPort, "dst-port", 0, "override destination port for all sessions")
-	f.Uint8Var(&runFlags.ttl, "ttl", 0, "override TTL (IPv4) / HopLimit (IPv6); 0=keep original")
+	f.StringSliceVar(&runFlags.srcIPPool, "src-ip-pool", nil,
+		"source IP pool: random IP per session (CIDR or plain IP, repeatable)")
+	f.StringSliceVar(&runFlags.dstIPPool, "dst-ip-pool", nil,
+		"destination IP pool: random IP per session (CIDR or plain IP, repeatable)")
+	f.IntVar(&runFlags.ipPoolLimit, "ip-pool-limit", 0,
+		"max hosts expanded per CIDR in the IP pool (0=default 256, max 65536)")
+
+	f.Uint16Var(&runFlags.srcPortMin, "src-port-min", 0,
+		"randomise source port from this value")
+	f.Uint16Var(&runFlags.srcPortMax, "src-port-max", 0,
+		"randomise source port up to this value")
+	f.Uint16Var(&runFlags.dstPort, "dst-port", 0,
+		"override destination port for all sessions")
+
+	f.Uint8Var(&runFlags.ttl, "ttl", 0,
+		"override TTL (IPv4) / HopLimit (IPv6); 0=keep original")
 	f.Uint8Var(&runFlags.dscp, "dscp", 0, "override DSCP (0–63); 0=keep original")
-	f.StringVar(&runFlags.tcpSetFlags, "tcp-set-flags", "", "TCP flags to force on, comma-separated: SYN,ACK,FIN,RST,PSH,URG")
-	f.StringVar(&runFlags.tcpClearFlags, "tcp-clear-flags", "", "TCP flags to force off, comma-separated: SYN,ACK,FIN,RST,PSH,URG")
-	f.Uint16Var(&runFlags.tcpWindow, "tcp-window", 0, "override TCP window size; 0=keep original")
-	f.StringVar(&runFlags.minDuration, "min-duration", "", "skip sessions shorter than this (e.g. 500ms)")
-	f.StringVar(&runFlags.maxDuration, "max-duration", "", "skip sessions longer than this (e.g. 30s)")
-	f.StringVar(&runFlags.startAfter, "start-after", "", "skip sessions that start before this time (RFC 3339)")
-	f.StringVar(&runFlags.startBefore, "start-before", "", "skip sessions that start after this time (RFC 3339)")
-	f.StringSliceVar(&runFlags.protos, "proto", nil, "include only these protocols (tcp,udp,icmp)")
+
+	f.StringVar(&runFlags.tcpSetFlags, "tcp-set-flags", "",
+		"TCP flags to force on, comma-separated: SYN,ACK,FIN,RST,PSH,URG")
+	f.StringVar(&runFlags.tcpClearFlags, "tcp-clear-flags", "",
+		"TCP flags to force off, comma-separated: SYN,ACK,FIN,RST,PSH,URG")
+	f.Uint16Var(&runFlags.tcpWindow, "tcp-window", 0,
+		"override TCP window size; 0=keep original")
+
+	f.StringVar(&runFlags.rate, "rate", "",
+		"rate limit: e.g. 100kpps, 1gbps, 50000pps, 100mbps")
+	f.StringVar(&runFlags.rateRamp, "rate-ramp", "",
+		"linearly ramp from 0 to --rate over this duration (e.g. 60s)")
+
+	f.Float64Var(&runFlags.cps, "cps", 0,
+		"connections per second: new sessions to start per second (0=unlimited; sequential/parallel only)")
+	f.Float64Var(&runFlags.multiplier, "multiplier", 1.0,
+		"rate multiplier applied to --rate and --cps (e.g. 2.0 doubles the effective rate)")
+
+	f.BoolVar(&runFlags.preProcess, "pre-process", false,
+		"pre-mutate all packets before replay starts (burst/parallel only)")
+
+	f.BoolVar(&runFlags.ipPoolPerIter, "ip-pool-per-iter", false,
+		"clear mutation plan cache at start of each loop iteration for fresh IP assignments")
+
+	f.IntVar(&runFlags.batchSize, "batch-size", 32,
+		"frames per SendBatch call in burst mode (1–256; requires AF_PACKET raw sender)")
+
+	f.StringVar(&runFlags.minDuration, "min-duration", "",
+		"skip sessions shorter than this (e.g. 500ms)")
+	f.StringVar(&runFlags.maxDuration, "max-duration", "",
+		"skip sessions longer than this (e.g. 30s)")
+	f.StringVar(&runFlags.startAfter, "start-after", "",
+		"skip sessions that start before this time (RFC 3339)")
+	f.StringVar(&runFlags.startBefore, "start-before", "",
+		"skip sessions that start after this time (RFC 3339)")
+
+	f.StringSliceVar(&runFlags.protos, "proto", nil,
+		"include only these protocols (tcp,udp,icmp)")
+
 	rootCmd.AddCommand(runCmd)
 }
 
@@ -87,6 +157,28 @@ func runReplay(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+
+	// Auto-resolve interface from target IP before validation (which checks
+	// that cfg.Interface is non-empty).
+	if cfg.TargetIP != "" {
+		targetIP := net.ParseIP(cfg.TargetIP)
+		if targetIP == nil {
+			return fmt.Errorf("invalid --target-ip %q", cfg.TargetIP)
+		}
+		info, err := netutil.Resolve(targetIP)
+		if err != nil {
+			return fmt.Errorf("auto-interface: %w", err)
+		}
+		if cfg.Interface == "" && len(cfg.Interfaces) == 0 {
+			cfg.Interface = info.Interface.Name
+		}
+		if info.GatewayMAC != nil && cfg.Mutations.DstMAC == "" {
+			cfg.Mutations.DstMAC = info.GatewayMAC.String()
+		}
+		fmt.Fprintf(os.Stderr, "Auto-resolved: interface=%s gateway=%v gatewayMAC=%v\n",
+			cfg.Interface, info.GatewayIP, info.GatewayMAC)
+	}
+
 	if err := config.Validate(cfg); err != nil {
 		return fmt.Errorf("config: %w", err)
 	}
@@ -107,15 +199,15 @@ func runReplay(cmd *cobra.Command, args []string) error {
 	}
 
 	allSessions = filter.Apply(allSessions)
-	fmt.Fprintf(os.Stderr, "Replaying %d sessions on %s (mode=%s speed=%.1f)…\n",
-		len(allSessions), cfg.Interface, cfg.Replay.Mode, cfg.Replay.Speed)
+	fmt.Fprintf(os.Stderr, "Replaying %d sessions (mode=%s speed=%.1f)…\n",
+		len(allSessions), cfg.Replay.Mode, cfg.Replay.Speed)
 
 	mut, err := mutation.New(cfg.Mutations)
 	if err != nil {
 		return fmt.Errorf("mutator: %w", err)
 	}
 
-	snd, err := sender.New(cfg.Interface)
+	snd, err := buildSender(cfg)
 	if err != nil {
 		return err
 	}
@@ -129,6 +221,9 @@ func runReplay(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("metrics: %w", err)
 	}
+	mc.TargetRate = cfg.Replay.Rate
+	mc.TargetCPS = cfg.Replay.CPS
+	mc.Multiplier = cfg.Replay.Multiplier
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
@@ -150,7 +245,47 @@ func runReplay(cmd *cobra.Command, args []string) error {
 		"\nDone. packets=%d bytes=%d errors=%d sessions=%d elapsed=%.1fs\n",
 		snap.PacketsSent, snap.BytesSent, snap.Errors, snap.SessionsDone, snap.ElapsedSec,
 	)
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return nil
+	}
 	return err
+}
+
+// buildSender creates the appropriate sender.Interface based on config.
+// Multi-interface lists produce a PoolSender; --sender raw produces a RawSender.
+func buildSender(cfg *config.Config) (sender.Interface, error) {
+	// Collect effective interface list.
+	ifaces := cfg.Interfaces
+	if len(ifaces) == 0 && cfg.Interface != "" {
+		ifaces = []string{cfg.Interface}
+	}
+	if len(ifaces) == 0 {
+		return nil, fmt.Errorf("no interface specified")
+	}
+
+	switch strings.ToLower(cfg.Sender) {
+	case "raw":
+		if len(ifaces) == 1 {
+			return sender.NewRaw(ifaces[0])
+		}
+		senders := make([]sender.Interface, len(ifaces))
+		for i, iface := range ifaces {
+			s, err := sender.NewRaw(iface)
+			if err != nil {
+				for _, prev := range senders[:i] {
+					prev.Close()
+				}
+				return nil, err
+			}
+			senders[i] = s
+		}
+		return sender.NewPoolFrom(senders), nil
+	default: // "pcap" or ""
+		if len(ifaces) > 1 {
+			return sender.NewPool(ifaces)
+		}
+		return sender.New(ifaces[0])
+	}
 }
 
 // buildConfig produces a Config from CLI flags, merging a file if --config is set.
@@ -161,30 +296,52 @@ func buildConfig(args []string) (*config.Config, error) {
 			return nil, err
 		}
 		// CLI flags override config file fields when they are explicitly set.
-		if runFlags.iface != "" {
-			cfg.Interface = runFlags.iface
+		if len(runFlags.ifaces) > 0 {
+			if len(runFlags.ifaces) == 1 {
+				cfg.Interface = runFlags.ifaces[0]
+			} else {
+				cfg.Interfaces = runFlags.ifaces
+			}
+		}
+		if runFlags.targetIP != "" {
+			cfg.TargetIP = runFlags.targetIP
 		}
 		return cfg, nil
 	}
 
-	if runFlags.iface == "" {
-		return nil, fmt.Errorf("--interface is required when no config file is provided")
+	if len(runFlags.ifaces) == 0 && runFlags.targetIP == "" {
+		return nil, fmt.Errorf("--interface or --target-ip is required when no config file is provided")
 	}
 	if len(args) == 0 {
 		return nil, fmt.Errorf("at least one PCAP file is required")
 	}
 
 	cfg := config.Default()
-	cfg.Interface = runFlags.iface
+	if len(runFlags.ifaces) == 1 {
+		cfg.Interface = runFlags.ifaces[0]
+	} else if len(runFlags.ifaces) > 1 {
+		cfg.Interfaces = runFlags.ifaces
+		cfg.Interface = runFlags.ifaces[0]
+	}
+	cfg.TargetIP = runFlags.targetIP
+	cfg.Sender = runFlags.senderType
+
 	for _, p := range args {
 		cfg.PcapFiles = append(cfg.PcapFiles, config.PcapSource{Path: p})
 	}
 	cfg.Replay = config.ReplayConfig{
-		Mode:      runFlags.mode,
-		Speed:     runFlags.speed,
-		Loop:      runFlags.loop,
-		LoopCount: runFlags.loopCount,
-		Workers:   runFlags.workers,
+		Mode:          runFlags.mode,
+		Speed:         runFlags.speed,
+		Loop:          runFlags.loop,
+		LoopCount:     runFlags.loopCount,
+		Workers:       runFlags.workers,
+		Rate:          runFlags.rate,
+		RateRamp:      runFlags.rateRamp,
+		CPS:           runFlags.cps,
+		Multiplier:    runFlags.multiplier,
+		PreProcess:    runFlags.preProcess,
+		IPPoolPerIter: runFlags.ipPoolPerIter,
+		BatchSize:     runFlags.batchSize,
 	}
 	cfg.Mutations = config.MutationConfig{
 		PreserveSessions: true,
@@ -192,6 +349,7 @@ func buildConfig(args []string) (*config.Config, error) {
 		DstIP:            runFlags.dstIP,
 		SrcIPPool:        runFlags.srcIPPool,
 		DstIPPool:        runFlags.dstIPPool,
+		IPPoolLimit:      runFlags.ipPoolLimit,
 		SrcPortMin:       runFlags.srcPortMin,
 		SrcPortMax:       runFlags.srcPortMax,
 		DstPort:          runFlags.dstPort,

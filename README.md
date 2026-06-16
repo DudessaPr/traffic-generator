@@ -1,8 +1,13 @@
-# tgen — PCAP Traffic Generator
+# tgen — Network Traffic Generator
 
-A high-performance, session-aware network traffic generator that replays
-captured PCAP files onto a live interface with configurable L3/L4 mutation,
-timing control, and session filtering.
+A high-performance tool for injecting network traffic onto a live interface.
+It has two distinct modes of operation:
+
+- **Replay** (`tgen run`) — replays captured PCAP files with session-aware
+  L3/L4 mutation, timing control, and session filtering.
+- **Generate** (`tgen generate`) — synthesises fresh IPv4/IPv6 packets from a
+  text template (no PCAP required); randomises addresses and ports per packet;
+  supports multiple concurrent worker goroutines and pre-built packet buffers.
 
 ---
 
@@ -13,6 +18,7 @@ timing control, and session filtering.
 3. [Quick start](#quick-start)
 4. [Commands](#commands)
    - [run](#run)
+   - [generate](#generate)
    - [inspect](#inspect)
    - [sessions](#sessions)
 5. [Configuration file](#configuration-file)
@@ -69,6 +75,16 @@ sudo ./build/tgen run -i eth0 --speed 2.0 --src-ip 10.0.0.1 capture.pcap
 
 # 5. Use a config file for full control
 sudo ./build/tgen run -c config/example.yaml
+
+# 6. Generate synthetic TCP SYN flood — no PCAP needed (requires root)
+sudo ./build/tgen generate \
+  -t "tcp:src=10.0.0.0/24:dst=192.168.1.1:dport=443:flags=SYN" \
+  -i eth0 --rate 100kpps
+
+# 7. Generate ICMP echo requests from a /16 range until Ctrl-C
+sudo ./build/tgen generate \
+  -t "icmp:src=10.0.0.0/16:dst=192.168.1.1" \
+  -i eth0
 ```
 
 ---
@@ -88,17 +104,27 @@ tgen run -c <config.yaml>
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `-i, --interface` | *(required)* | Network interface to inject traffic onto |
+| `-i, --interface` | *(required)* | Network interface(s) to inject traffic onto. Comma-separated or repeatable for multi-interface pool |
+| `--target-ip` | — | Auto-resolve outbound interface and gateway MAC for this destination IP (alternative to `--interface`) |
+| `--sender` | `pcap` | Packet injection backend: `pcap` (default) or `raw` (Linux AF_PACKET, lower overhead) |
 | `-c, --config` | — | YAML config file (overrides all other flags) |
 | `-s, --speed` | `1.0` | Replay speed multiplier. `1.0` = real-time, `2.0` = 2× faster, `0` = burst |
-| `-m, --mode` | `sequential` | Replay mode: `sequential`, `parallel`, `burst` |
+| `-m, --mode` | `sequential` | Replay mode: `sequential`, `parallel`, `burst`, `pcap` |
 | `-l, --loop` | `false` | Repeat indefinitely |
 | `--loop-count` | `0` | Number of replay passes (0 = once) |
 | `--workers` | `4` | Goroutine count for `parallel` mode |
+| `--rate` | — | Rate limit: `100kpps`, `1gbps`, `50000pps`, `100mbps` |
+| `--rate-ramp` | — | Linearly ramp from 0 to `--rate` over this duration (e.g. `60s`) |
+| `--cps` | `0` | Connections per second — new sessions to start per second (`0`=unlimited; `sequential`/`parallel` modes only) |
+| `--multiplier` | `1.0` | Multiplicative rate scaler applied to both `--rate` and `--cps` (e.g. `2.0` doubles both) |
+| `--pre-process` | `false` | Pre-mutate all packets before replay; removes gopacket overhead from send loop (`burst`/`parallel` only) |
+| `--ip-pool-per-iter` | `false` | Clear mutation plan cache at start of each loop iteration for fresh random IPs |
+| `--batch-size` | `32` | Frames per `SendBatch` call in `burst` mode (1–256). Has effect only when `--sender raw` is used (AF_PACKET); other senders fall back to per-packet `Send` |
 | `--src-ip` | — | Override source IP for all sessions (fixed, same IP for every session) |
 | `--dst-ip` | — | Override destination IP for all sessions (fixed) |
 | `--src-ip-pool` | — | Pick a random source IP per session from this pool (CIDR or plain IP, repeatable) |
 | `--dst-ip-pool` | — | Pick a random destination IP per session from this pool (CIDR or plain IP, repeatable) |
+| `--ip-pool-limit` | `0` | Max hosts expanded per CIDR in the IP pool (`0` = default 256, max 65536) |
 | `--src-port-min` | `0` | Randomise source port starting from this value |
 | `--src-port-max` | `0` | Randomise source port up to this value |
 | `--dst-port` | `0` | Override destination port for all sessions |
@@ -139,6 +165,15 @@ sudo ./build/tgen run -i eth0 --proto tcp --min-duration 1s traffic.pcap
 # Replay only GRE traffic (named protocol)
 sudo ./build/tgen run -i eth0 --proto gre traffic.pcap
 
+# CPS: start at most 500 new sessions per second in parallel mode
+sudo ./build/tgen run -i eth0 --mode parallel --workers 8 --cps 500 traffic.pcap
+
+# Multiplier: effectively double the rate without retyping the rate string
+sudo ./build/tgen run -i eth0 --rate 100kpps --multiplier 2.0 traffic.pcap
+
+# CPS + rate together: both limits apply simultaneously
+sudo ./build/tgen run -i eth0 --mode sequential --cps 1000 --rate 100kpps traffic.pcap
+
 # Replay multiple PCAP files in one pass
 sudo ./build/tgen run -i eth0 capture1.pcap capture2.pcap capture3.pcap
 
@@ -159,6 +194,106 @@ sudo ./build/tgen run -i eth0 --tcp-clear-flags RST traffic.pcap
 
 # Override TCP window size to 65535 to test receiver buffer behaviour
 sudo ./build/tgen run -i eth0 --tcp-window 65535 traffic.pcap
+```
+
+---
+
+### `generate`
+
+Synthesise and inject IPv4 or IPv6 packets from a template string — no PCAP
+file required.  Every packet is built from scratch; fields marked as CIDRs or
+port ranges are randomised independently for each packet.
+
+```
+tgen generate -t <template> [flags]
+```
+
+#### Template format
+
+```
+"proto:field=value:field=value:..."
+```
+
+| Part | Values | Notes |
+|------|--------|-------|
+| `proto` | `tcp` `udp` `icmp` `tcp6` `udp6` | Protocol (required, case-insensitive) |
+| `src=` | IP or CIDR | Source address / range (required; IPv4 for tcp/udp/icmp, IPv6 for tcp6/udp6) |
+| `dst=` | IP or CIDR | Destination address / range (required) |
+| `sport=` | `port` or `lo-hi` | Source port or range (default `1024-65535`) |
+| `dport=` | `port` or `lo-hi` | Destination port or range (default `80`) |
+| `ttl=` | `0–255` or `lo-hi` | IP TTL / IPv6 hop limit or range (default `64`); e.g. `ttl=32-64` randomises per packet |
+| `dscp=` | `0–63` or `lo-hi` | DSCP / DiffServ code point or range (default `0`); e.g. `dscp=0-46` randomises per packet |
+| `flags=` | `SYN,ACK,FIN,RST,PSH,URG` | TCP flags to set (`tcp` and `tcp6` only) |
+| `size=` | `0–65535` | Extra zero-padded payload bytes appended after L4 header (default `0`) |
+
+Fields are separated by `:`.  IPv6 addresses in field values (which also
+contain `:`) are handled correctly by the parser.
+
+#### Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-t, --template` | *(required)* | Packet template string |
+| `-i, --interface` | auto-detected | Outbound interface; auto-resolved from dst IP when omitted |
+| `--rate` | unlimited | Rate limit: `100kpps`, `1mpps`, `1gbps`, `100mbps`, … |
+| `--count` | `0` | Packets per cycle; `0` = run until Ctrl-C |
+| `--workers` | `1` | Concurrent sender goroutines (each with its own RNG) |
+| `--loop` | `false` | Restart after `--count` packets are sent; loop indefinitely |
+| `--pre-build` | `0` | Pre-build N packets per worker before the send loop; cycles through the buffer at runtime (removes `Build()` from hot path) |
+| `--cps` | `0` | Target new flows per second via ticker (0=unlimited). When `--count > 0`, a ticker fires at 1s/cps intervals; `--workers` goroutines drain the queue. Falls back to token-bucket upper-bound when `--count 0`. |
+| `--multiplier` | `1.0` | Multiplicative rate scaler applied to both `--rate` and `--cps` (e.g. `2.0` doubles both) |
+| `--batch-size` | `32` | Frames per `SendBatch` call when `--pre-build > 0` (1–256). Has effect only when the sender implements `Batcher` (AF_PACKET raw sender on Linux) |
+
+The gateway MAC for the Ethernet dst header is resolved automatically via ARP
+(the same mechanism used by `--target-ip` in `tgen run`).  If the ARP entry is
+missing, ping the gateway once to populate it and retry.
+
+#### Examples
+
+```bash
+# TCP SYN flood: random source IPs from /24, fixed dst, rate-limited
+sudo ./build/tgen generate \
+  -t "tcp:src=10.0.0.0/24:dst=192.168.1.1:dport=443:flags=SYN" \
+  -i eth0 --rate 100kpps
+
+# UDP DNS queries: fixed src, fixed dst, 1 million packets total
+sudo ./build/tgen generate \
+  -t "udp:src=10.0.0.1:dst=8.8.8.8:dport=53" \
+  -i eth0 --count 1000000
+
+# ICMP echo from large /16 range until Ctrl-C, auto-detect interface
+sudo ./build/tgen generate \
+  -t "icmp:src=10.0.0.0/16:dst=192.168.1.1"
+
+# IPv6 TCP from randomised /32 range — tcp6 accepts IPv6 CIDRs
+sudo ./build/tgen generate \
+  -t "tcp6:src=2001:db8::/32:dst=2001:db8::1:dport=443:flags=SYN" \
+  -i eth0 --workers 4 --rate 500kpps
+
+# Fixed-size 1400-byte UDP frames for bandwidth benchmarking
+sudo ./build/tgen generate \
+  -t "udp:src=10.0.0.0/8:dst=10.1.0.1:dport=5001:size=1400" \
+  -i eth0 --rate 1gbps --workers 8 --pre-build 1000
+
+# Repeat 100 k-packet cycles until Ctrl-C with 4 workers
+sudo ./build/tgen generate \
+  -t "tcp:src=10.0.0.0/24:dst=192.168.1.1:dport=80:flags=SYN" \
+  -i eth0 --count 100000 --loop --workers 4
+
+# CPS: start at most 200 new flow cycles per second across 4 workers
+sudo ./build/tgen generate \
+  -t "tcp:src=10.0.0.0/24:dst=192.168.1.1:dport=443:flags=SYN" \
+  -i eth0 --count 100 --loop --workers 4 --cps 200
+
+# Multiplier: scale both rate and CPS together
+sudo ./build/tgen generate \
+  -t "udp:src=10.0.0.1:dst=10.0.0.2:dport=5000" \
+  -i eth0 --rate 50kpps --cps 500 --multiplier 2.0
+
+# Batch send: pre-build 1000 packets, send in 64-frame sendmmsg batches (Linux AF_PACKET)
+sudo ./build/tgen generate \
+  -t "udp:src=10.0.0.0/8:dst=10.1.0.1:dport=5001:size=1400" \
+  -i eth0 --rate 1gbps --workers 8 --pre-build 1000 --batch-size 64
 ```
 
 ---
@@ -255,6 +390,9 @@ replay:
   loop: false          # repeat indefinitely
   loop_count: 0        # number of passes (0 = once)
   workers: 4           # goroutines for parallel mode
+  cps: 0               # new sessions per second (0 = unlimited; sequential/parallel only)
+  multiplier: 1.0      # rate scaler applied to rate and cps (0 treated as 1.0)
+  batch_size: 32       # frames per SendBatch in burst mode (0=default 32, max 256)
 
 # L3/L4 field mutation.
 mutations:
@@ -429,6 +567,7 @@ protocol number not in that list.
 | `sequential` | Sessions replayed one after another. Inter-packet gaps within each session are preserved, scaled by `--speed`. | Accurate simulation of a single network path |
 | `parallel` | Up to `--workers` sessions run concurrently. Each session is individually timing-accurate. Workers are capped to the number of sessions automatically. | Simulate many clients / flows simultaneously |
 | `burst` | All packets sent without any delay. | Stress / load testing; maximum throughput |
+| `pcap` | All packets from all sessions merged by original capture timestamp and replayed in global order. Preserves inter-packet gaps scaled by `--speed`. | Replicate exact original traffic shape across sessions |
 
 **Speed examples:**
 
@@ -449,19 +588,30 @@ Inter-packet gaps are capped at 1 hour regardless of speed to prevent
 tgen prints a one-line report at each `report_interval`:
 
 ```
-[metrics] elapsed=1.0s pkts=1234 bytes=1543210 pps=1234 bps=1543210 errors=0 sessions=5 empty=0
+[metrics] elapsed=1.0s pkts=1234 pps=1234 bps=1543210 errors=0 active=43 open=12 cps=43 empty=0
 ```
 
 | Field | Meaning |
 |-------|---------|
-| `elapsed` | Seconds since replay started |
+| `elapsed` | Seconds since replay/generation started |
 | `pkts` | Total packets injected so far |
-| `bytes` | Total bytes injected so far |
 | `pps` | Packets per second (current interval) |
 | `bps` | Bytes per second (current interval) |
 | `errors` | Mutation or injection errors |
-| `sessions` | Completed sessions |
+| `active` | Flows currently in flight (started but not yet finished) |
+| `open` | Flows with no FIN or RST sent yet (TCP stateless generator: always equal to `active`) |
+| `cps` | New flows started per second (measured, current interval). When `--cps` is configured, the label changes to `actual_cps` and `target_cps=<N>` is also printed. |
 | `empty` | Packets with zero-length data skipped without sending |
+
+When `--cps` is configured the line uses `target_cps` / `actual_cps` labels:
+
+```
+[metrics] elapsed=1.0s pkts=50000 pps=50000 bps=... errors=0 active=4 open=4 target_cps=100 actual_cps=98 empty=0
+```
+
+The `Snapshot` returned by `mc.Snapshot()` also exposes `TargetRate`, `TargetCPS`,
+and `Multiplier` — the configured (pre-multiplier) values — for use in custom
+reporting or testing.
 
 To write metrics to a file:
 
@@ -494,8 +644,23 @@ Benchmark results (Apple M3 Pro):
 | `BenchmarkApply` | ~2.1 M pkt/s | Realistic client→server TCP packet, all fields mutated |
 | `BenchmarkSequential` | ~1.9 M pkt/s | 100 sessions × 100 pkts, Speed=0, no network I/O |
 | `BenchmarkParallel` (8 workers) | ~4.3 M pkt/s | ~2.2× speedup over sequential |
-| `BenchmarkBurst` | ~2.1 M pkt/s | 100 sessions × 100 pkts, burst mode |
+| `BenchmarkBurst` | ~2.1 M pkt/s | 100 sessions × 100 pkts, burst mode, per-packet Send |
+| `BenchmarkBurstBatch` | ~2.3 M pkt/s | Same workload, batch-size=32, SendBatch mock |
 | `BenchmarkBurstReplay` | ~2.1 M pkt/s | 10 sessions × 100 pkts, original replay benchmark |
+
+**Batch-send performance notes** (`--sender raw --mode burst --batch-size N` on Linux):
+
+- `sendmmsg` reduces per-packet kernel transitions. At 100kpps, 32-frame batches
+  cut syscall count by ~32×; the gain is most visible when the CPU is syscall-bound
+  rather than memory-bandwidth-bound.
+- Larger batch sizes (64–128) improve throughput at high packet rates but add
+  latency to the first frame in each batch. Use 32 (default) as a starting point
+  and tune upward for maximum throughput or downward for lower burst latency.
+- On macOS or with `--sender pcap`, `Batcher` is not implemented; the code
+  automatically falls back to per-packet `Send` with no configuration change needed.
+- The generator (`tgen generate`) uses batch only when both `--pre-build > 0`
+  and the sender implements `Batcher`. On-the-fly packet builds always use
+  per-packet sends regardless of `--batch-size`.
 
 ---
 
@@ -515,6 +680,82 @@ Benchmark results (Apple M3 Pro):
 | `make clean` | Remove `./build/` |
 
 ---
+
+## Stress testing examples
+
+### Synthetic generation (no PCAP)
+
+```bash
+# Maximum-rate TCP SYN flood with randomised source IPs
+sudo ./build/tgen generate \
+  -t "tcp:src=10.0.0.0/8:dst=192.168.1.1:dport=443:flags=SYN" \
+  -i eth0
+
+# Rate-capped UDP flood from a /16 source range
+sudo ./build/tgen generate \
+  -t "udp:src=10.0.0.0/16:dst=192.168.1.1:dport=5000-6000" \
+  -i eth0 --rate 100kpps
+
+# Fixed-count ICMP ping storm, auto-detect interface
+sudo ./build/tgen generate \
+  -t "icmp:src=10.0.0.0/24:dst=192.168.1.1" \
+  --count 10000000
+
+# Multi-worker 1 Gbps UDP flood with 1400-byte frames (pre-built buffers remove Build() from hot path)
+sudo ./build/tgen generate \
+  -t "udp:src=10.0.0.0/8:dst=10.1.0.1:dport=5001:size=1400" \
+  -i eth0 --rate 1gbps --workers 8 --pre-build 2000
+
+# IPv6 TCP SYN flood, 4 workers
+sudo ./build/tgen generate \
+  -t "tcp6:src=2001:db8::/32:dst=2001:db8::1:dport=443:flags=SYN" \
+  -i eth0 --workers 4 --rate 500kpps
+
+# Loop: repeat 1 M-packet cycles indefinitely until Ctrl-C
+sudo ./build/tgen generate \
+  -t "tcp:src=10.0.0.0/24:dst=192.168.1.1:dport=443:flags=SYN" \
+  -i eth0 --count 1000000 --loop
+```
+
+### PCAP replay
+
+# Rate-limited stress test at exactly 100 kpps
+sudo ./build/tgen run -i eth0 --mode burst --rate 100kpps traffic.pcap
+
+# Ramp from 0 to 1 Gbps over 60 seconds
+sudo ./build/tgen run -i eth0 --mode burst --rate 1gbps --rate-ramp 60s traffic.pcap
+
+# Multi-interface for higher bandwidth (round-robin across 3 NICs)
+sudo ./build/tgen run -i eth0,eth1,eth2 --mode burst --rate 3gbps traffic.pcap
+
+# Auto-detect interface from target IP (also sets gateway MAC)
+sudo ./build/tgen run --target-ip 10.0.1.100 --mode burst traffic.pcap
+
+# Fresh IP pool each loop iteration — every pass uses different source IPs
+sudo ./build/tgen run -i eth0 --mode burst --loop-count 10 \
+  --src-ip-pool 10.0.0.0/16 --ip-pool-per-iter traffic.pcap
+
+# Large IP pool (up to 65536 hosts per CIDR)
+sudo ./build/tgen run -i eth0 --mode burst \
+  --src-ip-pool 10.0.0.0/16 --ip-pool-limit 65536 traffic.pcap
+
+# Pre-process all packets before replay (removes gopacket from hot path)
+sudo ./build/tgen run -i eth0 --mode parallel --workers 8 \
+  --pre-process --src-ip 10.0.0.1 traffic.pcap
+
+# AF_PACKET raw sender (Linux only, lower overhead)
+sudo ./build/tgen run -i eth0 --sender raw --mode burst traffic.pcap
+
+# Batch sending: send 64 frames per sendmmsg syscall (Linux AF_PACKET only)
+sudo ./build/tgen run -i eth0 --sender raw --mode burst --batch-size 64 traffic.pcap
+
+# Batch + pre-process: mutations done upfront, then sent in 128-frame batches
+sudo ./build/tgen run -i eth0 --sender raw --mode burst \
+  --pre-process --batch-size 128 --src-ip 10.0.0.1 traffic.pcap
+
+# Pcap-order replay (global timestamp order across all sessions)
+sudo ./build/tgen run -i eth0 --mode pcap --speed 2.0 traffic.pcap
+```
 
 ## CLI examples
 

@@ -21,6 +21,19 @@ type discardSender struct{ sent int }
 func (d *discardSender) Send(_ []byte) error { d.sent++; return nil }
 func (d *discardSender) Close()              {}
 
+// batchDiscardSender implements sender.Batcher for benchmarks.
+type batchDiscardSender struct {
+	sent      int
+	batchSent int
+}
+
+func (b *batchDiscardSender) Send(_ []byte) error { b.sent++; return nil }
+func (b *batchDiscardSender) SendBatch(frames [][]byte) (int, error) {
+	b.batchSent += len(frames)
+	return len(frames), nil
+}
+func (b *batchDiscardSender) Close() {}
+
 func buildRawTCPPacket() []byte {
 	eth := &layers.Ethernet{
 		SrcMAC:       net.HardwareAddr{0, 1, 2, 3, 4, 5},
@@ -84,6 +97,7 @@ func BenchmarkSequential(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_ = rp.runSequential(context.Background(), sessions)
 	}
+
 	b.ReportMetric(float64(mc.C.PacketsSent.Load())/float64(b.N), "pkts/op")
 }
 
@@ -99,7 +113,7 @@ func BenchmarkParallel(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = rp.runParallel(context.Background(), sessions)
+		_ = rp.runParallel(context.Background(), sessions, nil)
 	}
 	b.ReportMetric(float64(mc.C.PacketsSent.Load())/float64(b.N), "pkts/op")
 }
@@ -115,7 +129,26 @@ func BenchmarkBurst(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = rp.runBurst(context.Background(), sessions)
+		_ = rp.runBurst(context.Background(), sessions, nil)
+	}
+	b.ReportMetric(float64(mc.C.PacketsSent.Load())/float64(b.N), "pkts/op")
+}
+
+// BenchmarkBurstBatch measures burst-mode throughput when the sender implements
+// Batcher, allowing multiple frames to be delivered in a single SendBatch call.
+// 100 sessions × 100 packets = 10 000 packets per iteration.
+// Compare with BenchmarkBurst to quantify the per-syscall savings.
+func BenchmarkBurstBatch(b *testing.B) {
+	sessions := makeBenchSessions(100, 100)
+	bs := &batchDiscardSender{}
+	mc, _ := metrics.New(time.Hour, "stdout")
+	mut, _ := mutation.New(config.MutationConfig{PreserveSessions: true, SrcIP: "172.16.0.1", DstIP: "172.16.0.2"})
+	rp := New(config.ReplayConfig{Mode: "burst", BatchSize: 32}, mut, bs, mc)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = rp.runBurst(context.Background(), sessions, nil)
 	}
 	b.ReportMetric(float64(mc.C.PacketsSent.Load())/float64(b.N), "pkts/op")
 }
@@ -137,7 +170,7 @@ func BenchmarkBurstReplay(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = rp.runBurst(context.Background(), sessions)
+		_ = rp.runBurst(context.Background(), sessions, nil)
 	}
 	// Total packets / iterations gives a stable pkts/op across all b.N.
 	b.ReportMetric(float64(mc.C.PacketsSent.Load())/float64(b.N), "pkts/op")
