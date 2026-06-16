@@ -94,29 +94,41 @@ func runGenerate(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("--template: %w", err)
 	}
 
-	// Resolve outbound interface and gateway MAC from the dst IP.
-	dstIP := tmpl.RouteDstIP()
-	info, err := netutil.Resolve(dstIP)
-	if err != nil {
-		return fmt.Errorf("resolve outbound path to %s: %w", dstIP, err)
-	}
-	if info.GatewayMAC == nil {
-		return fmt.Errorf(
-			"could not resolve gateway MAC for %s — ping the gateway to populate the ARP table, then retry",
-			dstIP)
-	}
+	var (
+		primaryIface string
+		srcMAC       net.HardwareAddr
+		dstMAC       net.HardwareAddr
+	)
 
-	// Primary interface: first from --interface list, or auto-detected.
-	primaryIface := info.Interface.Name
 	if len(genFlags.ifaces) > 0 {
+		// Interface(s) explicitly specified — resolve src MAC locally, skip ARP.
 		primaryIface = genFlags.ifaces[0]
+		iface, err := net.InterfaceByName(primaryIface)
+		if err != nil {
+			return fmt.Errorf("interface %q: %w", primaryIface, err)
+		}
+		srcMAC = iface.HardwareAddr
+		dstMAC = net.HardwareAddr{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
+	} else {
+		// Auto-detect: resolve outbound interface and gateway MAC from dst IP.
+		dstIP := tmpl.RouteDstIP()
+		info, err := netutil.Resolve(dstIP)
+		if err != nil {
+			return fmt.Errorf("resolve outbound path to %s: %w", dstIP, err)
+		}
+		if info.GatewayMAC == nil {
+			return fmt.Errorf(
+				"could not resolve gateway MAC for %s — specify -i <iface> to skip ARP resolution, or ping the gateway to populate the ARP table",
+				dstIP)
+		}
+		primaryIface = info.Interface.Name
+		iface, err := net.InterfaceByName(primaryIface)
+		if err != nil {
+			return fmt.Errorf("interface %q: %w", primaryIface, err)
+		}
+		srcMAC = iface.HardwareAddr
+		dstMAC = info.GatewayMAC
 	}
-	iface, err := net.InterfaceByName(primaryIface)
-	if err != nil {
-		return fmt.Errorf("interface %q: %w", primaryIface, err)
-	}
-	srcMAC := iface.HardwareAddr
-	dstMAC := info.GatewayMAC
 
 	// Collect all interfaces; fall back to the single resolved one.
 	allIfaces := genFlags.ifaces
@@ -125,10 +137,10 @@ func runGenerate(_ *cobra.Command, _ []string) error {
 	}
 
 	if len(allIfaces) == 1 {
-		fmt.Fprintf(os.Stderr, "Interface: %s  src-MAC: %s  gateway-MAC: %s\n",
+		fmt.Fprintf(os.Stderr, "Interface: %s  src-MAC: %s  dst-MAC: %s\n",
 			allIfaces[0], srcMAC, dstMAC)
 	} else {
-		fmt.Fprintf(os.Stderr, "Interfaces: %v  src-MAC: %s  gateway-MAC: %s\n",
+		fmt.Fprintf(os.Stderr, "Interfaces: %v  src-MAC: %s  dst-MAC: %s\n",
 			allIfaces, srcMAC, dstMAC)
 	}
 
@@ -148,18 +160,19 @@ func runGenerate(_ *cobra.Command, _ []string) error {
 	}
 
 	cfg := generate.Config{
-		Rate:      genFlags.rate,
-		Count:     genFlags.count,
-		Loop:      genFlags.loop,
-		Workers:   genFlags.workers,
-		PreBuild:  genFlags.preBuild,
-		CPS:       genFlags.cps,
+		Rate:       genFlags.rate,
+		Count:      genFlags.count,
+		Loop:       genFlags.loop,
+		Workers:    genFlags.workers,
+		PreBuild:   genFlags.preBuild,
+		CPS:        genFlags.cps,
 		Multiplier: genFlags.multiplier,
-		BatchSize: genFlags.batchSize,
+		BatchSize:  genFlags.batchSize,
 	}
 	mc.TargetRate = genFlags.rate
 	mc.TargetCPS = genFlags.cps
 	mc.Multiplier = genFlags.multiplier
+	dstMAC, _ = net.ParseMAC("04:f4:1c:ba:bc:e8")
 	g, err := generate.New(cfg, tmpl, snd, srcMAC, dstMAC, mc)
 	if err != nil {
 		return err

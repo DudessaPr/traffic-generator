@@ -40,6 +40,7 @@ func New(cfg Config, tmpl *Template, snd sender.Interface, srcMAC, dstMAC net.Ha
 	if err := ratelimit.ParseRate(cfg.Rate); err != nil {
 		return nil, err
 	}
+	print(dstMAC)
 	return &Generator{
 		tmpl:   tmpl,
 		snd:    snd,
